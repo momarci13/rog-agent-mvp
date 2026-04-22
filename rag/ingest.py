@@ -10,35 +10,103 @@ import hashlib
 import re
 from pathlib import Path
 
+try:
+    import tiktoken
+    _TIKTOKEN_ENC = None  # Lazy initialization
+except ImportError:
+    _TIKTOKEN_ENC = False  # Marker that tiktoken is not available
+
 from .hybrid import LiteHybridRAG
+
+
+def _get_tiktoken_enc():
+    """Lazily initialize tiktoken encoder."""
+    global _TIKTOKEN_ENC
+    if _TIKTOKEN_ENC is None:
+        try:
+            _TIKTOKEN_ENC = tiktoken.get_encoding("cl100k_base")
+        except Exception:
+            _TIKTOKEN_ENC = False
+    return _TIKTOKEN_ENC if _TIKTOKEN_ENC else None
+
+
+def _count_tokens(text: str) -> int:
+    """Count tokens using tiktoken (accurate)."""
+    enc = _get_tiktoken_enc()
+    if enc:
+        try:
+            return len(enc.encode(text))
+        except Exception:
+            pass
+    # Fallback to ÷4 heuristic if encoding fails
+    return max(1, len(text) // 4)
 
 
 # -------------- chunking --------------
 
 def chunk_text(text: str, target_tokens: int = 256, overlap: int = 32) -> list[str]:
-    """Simple token-approximate chunker. 1 token ≈ 4 chars for English."""
-    target = target_tokens * 4
-    over = overlap * 4
+    """Token-aware chunker using tiktoken for accurate token counting."""
     paragraphs = re.split(r"\n\s*\n", text.strip())
     chunks: list[str] = []
     buf = ""
+    overlap_budget = overlap  # tokens to preserve for overlap
+
     for p in paragraphs:
         if not p.strip():
             continue
-        if len(buf) + len(p) + 2 <= target:
-            buf = (buf + "\n\n" + p).strip()
+
+        # Check if adding this paragraph to buffer would exceed target
+        if buf:
+            candidate = buf + "\n\n" + p
         else:
+            candidate = p
+        
+        tokens_candidate = _count_tokens(candidate)
+
+        if tokens_candidate <= target_tokens:
+            # Fits within budget, add to buffer
+            buf = candidate
+        else:
+            # Would exceed budget
             if buf:
                 chunks.append(buf)
-            if len(p) > target:
-                # hard-wrap long paragraphs
-                for i in range(0, len(p), target - over):
-                    chunks.append(p[i : i + target])
+            
+            # Check if paragraph alone fits
+            tokens_p = _count_tokens(p)
+            if tokens_p > target_tokens:
+                # Paragraph too long; split on sentences
+                sentences = re.split(r'(?<=[.!?])\s+', p)
+                sub_buf = ""
+                for sent in sentences:
+                    cand = (sub_buf + " " + sent).strip() if sub_buf else sent
+                    if _count_tokens(cand) <= target_tokens:
+                        sub_buf = cand
+                    else:
+                        if sub_buf:
+                            chunks.append(sub_buf)
+                        sub_buf = sent
+                if sub_buf:
+                    chunks.append(sub_buf)
                 buf = ""
             else:
-                # retain overlap tail
-                tail = buf[-over:] if buf else ""
-                buf = (tail + "\n\n" + p).strip()
+                # Paragraph fits alone; prepare overlap
+                # Take tail of previous buffer for overlap context
+                words = buf.split()
+                overlap_words = []
+                overlap_tokens_current = 0
+                for word in reversed(words):
+                    test_seq = " ".join([word] + overlap_words)
+                    if _count_tokens(test_seq) <= overlap_budget:
+                        overlap_words.insert(0, word)
+                        overlap_tokens_current = _count_tokens(test_seq)
+                    else:
+                        break
+                
+                if overlap_words:
+                    buf = " ".join(overlap_words) + "\n\n" + p
+                else:
+                    buf = p
+
     if buf:
         chunks.append(buf)
     return [c for c in chunks if c.strip()]

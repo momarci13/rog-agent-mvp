@@ -29,6 +29,14 @@ rag:
   top_k: 6
   top_m: 30                 # candidates before rerank fusion
   token_budget: 3500        # packed context budget for the LLM
+  # Metadata filtering (optional): pass to retrieve() as dict:
+  # metadata_filters: {
+  #   "kind": "doc" | "bib",           # document type
+  #   "year_min": "2020",              # oldest year (inclusive)
+  #   "year_max": "2024",              # newest year (inclusive)
+  #   "source": "filename.pdf"         # specific source file
+  # }
+  # Example: retrieve(query, metadata_filters={"year_min": "2020"})
 
 agent:
   max_iterations: 2         # critic revision loop cap

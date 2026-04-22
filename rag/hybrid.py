@@ -37,6 +37,45 @@ try:
 except Exception as e:  # pragma: no cover
     raise ImportError("rank-bm25 is required. Install: pip install rank-bm25") from e
 
+try:
+    import tiktoken
+except Exception as e:  # pragma: no cover
+    raise ImportError("tiktoken is required. Install: pip install tiktoken") from e
+
+try:
+    from nltk.corpus import stopwords
+    from nltk.stem import PorterStemmer
+    import nltk
+    try:
+        nltk.data.find('corpora/stopwords')
+    except LookupError:
+        nltk.download('stopwords', quiet=True)
+except Exception as e:  # pragma: no cover
+    raise ImportError("nltk is required. Install: pip install nltk") from e
+
+
+# -------------- tokenization & stemming ----------------
+
+_stemmer = PorterStemmer()
+_stopwords = set(stopwords.words('english'))
+_tiktoken_enc = tiktoken.get_encoding("cl100k_base")
+
+
+def _tokenize_stem(text: str) -> list[str]:
+    """Tokenize, stem, and remove stopwords."""
+    tokens = text.lower().split()
+    stemmed = [_stemmer.stem(t) for t in tokens]
+    return [t for t in stemmed if t not in _stopwords and len(t) > 1]
+
+
+def _count_tokens(text: str) -> int:
+    """Count tokens using tiktoken (more accurate than ÷4 heuristic)."""
+    try:
+        return len(_tiktoken_enc.encode(text))
+    except Exception:
+        # Fallback to rough estimate if encoding fails
+        return max(1, len(text) // 4)
+
 
 class LiteHybridRAG:
     def __init__(
@@ -86,7 +125,7 @@ class LiteHybridRAG:
         self._rebuild_bm25()
 
     def _rebuild_bm25(self) -> None:
-        tokens = [t.lower().split() for t in self._texts]
+        tokens = [_tokenize_stem(t) for t in self._texts]
         self._bm25 = BM25Okapi(tokens) if tokens else None
         self._save_bm25_cache()
 
@@ -104,7 +143,7 @@ class LiteHybridRAG:
             self._texts = cache.get("texts", [])
             self._metas = cache.get("metas", [])
             if self._texts:
-                self._bm25 = BM25Okapi([t.lower().split() for t in self._texts])
+                self._bm25 = BM25Okapi([_tokenize_stem(t) for t in self._texts])
 
     # ---------------- retrieval ----------------
 
@@ -114,32 +153,89 @@ class LiteHybridRAG:
         k: int = 6,
         m: int = 30,
         token_budget: int = 3500,
+        metadata_filters: dict | None = None,
     ) -> list[dict]:
+        """Retrieve top-k documents using hybrid dense+BM25 retrieval.
+        
+        Args:
+            query: search query
+            k: max documents to return
+            m: candidates before fusion
+            token_budget: max tokens for context packing
+            metadata_filters: dict with optional keys:
+                - kind: "doc" or "bib"
+                - year_min, year_max: year range (as strings)
+                - source: filename filter
+        
+        Returns:
+            list of {"id", "text", "meta", "score"} dicts
+        """
         if not self._ids:
             return []
 
         m = min(m, len(self._ids))
 
+        # Apply metadata filtering
+        valid_indices = set(range(len(self._ids)))
+        if metadata_filters:
+            if metadata_filters.get("kind"):
+                kind = metadata_filters["kind"]
+                valid_indices &= {
+                    i for i in valid_indices
+                    if i < len(self._metas) and self._metas[i].get("kind") == kind
+                }
+            if "year_min" in metadata_filters or "year_max" in metadata_filters:
+                year_min = metadata_filters.get("year_min")
+                year_max = metadata_filters.get("year_max")
+                def in_year_range(y):
+                    if not y:
+                        return False
+                    try:
+                        y_int = int(y)
+                        if year_min and y_int < int(year_min):
+                            return False
+                        if year_max and y_int > int(year_max):
+                            return False
+                        return True
+                    except (ValueError, TypeError):
+                        return False
+                valid_indices &= {
+                    i for i in valid_indices
+                    if i < len(self._metas) and in_year_range(self._metas[i].get("year"))
+                }
+            if metadata_filters.get("source"):
+                source = metadata_filters["source"]
+                valid_indices &= {
+                    i for i in valid_indices
+                    if i < len(self._metas) and self._metas[i].get("source") == source
+                }
+
+        if not valid_indices:
+            return []
+
         # Dense
         qv = self.emb.encode([query], normalize_embeddings=True).tolist()
-        dres = self.col.query(query_embeddings=qv, n_results=m)
+        dres = self.col.query(query_embeddings=qv, n_results=len(self._ids))
         # chroma returns distances in cosine distance space (1 - cos)
         d_ids = dres["ids"][0]
         d_dist = dres["distances"][0]
         dense_scores = {
             i: max(0.0, 1.0 - float(dist)) for i, dist in zip(d_ids, d_dist)
+            if self._ids.index(i) in valid_indices
         }
 
         # BM25
         bm25_scores: dict[str, float] = {}
         if self._bm25 is not None:
-            raw = np.asarray(self._bm25.get_scores(query.lower().split()), dtype=float)
-            if raw.size:
-                mn, mx = float(raw.min()), float(raw.max())
-                norm = (raw - mn) / (mx - mn + 1e-9)
-                top_bm = np.argsort(-raw)[:m]
-                for idx in top_bm:
-                    bm25_scores[self._ids[idx]] = float(norm[idx])
+            query_tokens = _tokenize_stem(query)
+            if query_tokens:
+                raw = np.asarray(self._bm25.get_scores(query_tokens), dtype=float)
+                if raw.size:
+                    mn, mx = float(raw.min()), float(raw.max())
+                    norm = (raw - mn) / (mx - mn + 1e-9)
+                    for idx in valid_indices:
+                        if idx < len(self._ids):
+                            bm25_scores[self._ids[idx]] = float(norm[idx])
 
         # Fuse
         keys = set(dense_scores) | set(bm25_scores)
@@ -161,7 +257,7 @@ class LiteHybridRAG:
             if idx is None:
                 continue
             text = self._texts[idx]
-            approx_tokens = max(1, len(text) // 4)  # rough tok estimate
+            approx_tokens = _count_tokens(text)  # Use tiktoken instead of ÷4
             if used + approx_tokens > token_budget and selected:
                 continue
             selected.append({
