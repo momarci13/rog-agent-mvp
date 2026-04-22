@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+
+# Project artifacts
+output/
+kb/chroma/
+kb/*.pkl
+data/market/*.parquet
+data/market/*.csv
+!data/market/.gitkeep
+!data/papers/.gitkeep
+!kb/.gitkeep
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Models / large blobs (if you ever copy GGUFs locally)
+*.gguf
+*.bin
+
+# Notebook checkpoints
+.ipynb_checkpoints/

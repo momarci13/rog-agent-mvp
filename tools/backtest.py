@@ -1,0 +1,203 @@
+"""Simple, correct event-driven backtester.
+
+No vectorbt / backtrader dependency — pandas + numpy is enough for daily
+bars on <100 tickers. Execution occurs on next-bar open (no lookahead).
+"""
+from __future__ import annotations
+
+import math
+from dataclasses import dataclass
+from typing import Callable
+
+import numpy as np
+import pandas as pd
+
+from .risk import (
+    cagr,
+    deflated_sharpe,
+    historical_var,
+    max_drawdown,
+    sharpe_ratio,
+    sortino_ratio,
+)
+
+
+@dataclass
+class BacktestConfig:
+    initial_equity: float = 100_000.0
+    fee_bps: float = 1.0          # one-way commission in basis points
+    slippage_bps: float = 2.0     # one-way slippage in bps
+    rebalance_days: int = 5
+    max_weight: float = 0.2
+    long_only: bool = True
+
+
+def _pct_returns(prices: pd.DataFrame) -> pd.DataFrame:
+    return prices.pct_change().fillna(0.0)
+
+
+def run_backtest(
+    prices: pd.DataFrame,
+    signal_fn: Callable[[pd.DataFrame], pd.Series],
+    cfg: BacktestConfig,
+    symbol: str | None = None,
+) -> dict:
+    """Run a single-asset backtest.
+
+    `signal_fn(df)` must return a Series of positions in [-1, 1]
+    aligned to `df.index`. df has columns
+    ['open','high','low','close','volume'].
+
+    For multi-asset strategies use `run_portfolio_backtest`.
+    """
+    df = prices.copy().dropna()
+    if len(df) < 30:
+        raise ValueError(f"Not enough data: {len(df)} bars")
+
+    # Signal -> desired position, shift by 1 (execute next bar)
+    pos = signal_fn(df).reindex(df.index).fillna(0.0).clip(-1, 1)
+    pos_exec = pos.shift(1).fillna(0.0)
+
+    # Returns of the asset
+    rets = df["close"].pct_change().fillna(0.0)
+
+    # Turnover cost applied on position changes
+    trade = pos_exec.diff().abs().fillna(abs(pos_exec.iloc[0]))
+    cost_rate = (cfg.fee_bps + cfg.slippage_bps) / 10_000.0
+    strat_ret = pos_exec * rets - trade * cost_rate
+
+    equity = cfg.initial_equity * (1 + strat_ret).cumprod()
+    trades = int((pos_exec.diff().abs() > 1e-9).sum())
+    wins = int((strat_ret[strat_ret != 0] > 0).sum())
+    total_nz = int((strat_ret != 0).sum())
+    win_rate = wins / total_nz if total_nz else 0.0
+
+    sr = sharpe_ratio(strat_ret)
+    return {
+        "symbol": symbol,
+        "equity": equity,
+        "returns": strat_ret,
+        "sharpe": sr,
+        "sortino": sortino_ratio(strat_ret),
+        # With 1 trial, DSR ≈ P(SR > 0)
+        "deflated_sharpe": deflated_sharpe(sr, strat_ret, n_trials=1),
+        "max_drawdown": max_drawdown(equity),
+        "cagr": cagr(equity),
+        "win_rate": win_rate,
+        "n_trades": trades,
+        "final_equity": float(equity.iloc[-1]) if len(equity) else cfg.initial_equity,
+        "var_99": historical_var(strat_ret, 0.99),
+    }
+
+
+def run_portfolio_backtest(
+    prices: dict[str, pd.DataFrame],
+    signal_fn: Callable[[pd.DataFrame], pd.Series],
+    cfg: BacktestConfig,
+    n_trials: int = 1,
+) -> dict:
+    """Run the signal on each symbol and equal-weight combine.
+
+    `prices` is a dict symbol -> OHLCV DataFrame.
+    """
+    per_symbol_ret = []
+    syms = list(prices.keys())
+    aligned_idx = None
+    for sym in syms:
+        df = prices[sym].dropna()
+        pos = signal_fn(df).reindex(df.index).fillna(0.0).clip(-1, 1).shift(1).fillna(0.0)
+        rets = df["close"].pct_change().fillna(0.0)
+        trade = pos.diff().abs().fillna(abs(pos.iloc[0]))
+        cost = (cfg.fee_bps + cfg.slippage_bps) / 10_000.0
+        r = pos * rets - trade * cost
+        r.name = sym
+        per_symbol_ret.append(r)
+        aligned_idx = r.index if aligned_idx is None else aligned_idx.intersection(r.index)
+
+    mat = pd.concat(
+        [r.reindex(aligned_idx).fillna(0.0) for r in per_symbol_ret], axis=1
+    )
+    port_ret = mat.mean(axis=1)  # equal weight
+    equity = cfg.initial_equity * (1 + port_ret).cumprod()
+    sr = sharpe_ratio(port_ret)
+
+    # Trade counting: union across assets
+    trades = int(sum((r.diff().abs() > 1e-9).sum() for r in per_symbol_ret))
+
+    return {
+        "symbols": syms,
+        "equity": equity,
+        "returns": port_ret,
+        "sharpe": sr,
+        "sortino": sortino_ratio(port_ret),
+        "deflated_sharpe": deflated_sharpe(sr, port_ret, n_trials=n_trials),
+        "max_drawdown": max_drawdown(equity),
+        "cagr": cagr(equity),
+        "win_rate": float((port_ret > 0).sum() / max(1, (port_ret != 0).sum())),
+        "n_trades": trades,
+        "final_equity": float(equity.iloc[-1]) if len(equity) else cfg.initial_equity,
+        "var_99": historical_var(port_ret, 0.99),
+    }
+
+
+# ---------------- signal compilation ----------------
+
+def compile_signal(signal_code: str) -> Callable[[pd.DataFrame], pd.Series]:
+    """Compile a StrategySpec.signal_code string into a callable.
+
+    The string must be a single Python EXPRESSION over the symbol `df`
+    (DataFrame with OHLCV) that returns a Series in [-1, 1].
+
+    Example: "(df['close'] > df['close'].rolling(50).mean()).astype(float) - 0.5"
+    """
+    import numpy as _np
+    safe_globals = {
+        "__builtins__": {},
+        "np": _np,
+        "pd": pd,
+        "abs": abs,
+        "min": min,
+        "max": max,
+        "len": len,
+        "float": float,
+        "int": int,
+    }
+
+    def _fn(df: pd.DataFrame) -> pd.Series:
+        locs = {"df": df}
+        sig = eval(signal_code, safe_globals, locs)  # noqa: S307
+        if isinstance(sig, (int, float)):
+            sig = pd.Series(float(sig), index=df.index)
+        elif not isinstance(sig, pd.Series):
+            sig = pd.Series(sig, index=df.index[: len(sig)])
+        return sig.astype(float)
+    return _fn
+
+
+# ---------------- market data helper ----------------
+
+def fetch_yahoo(
+    symbols: list[str],
+    start: str = "2015-01-01",
+    end: str | None = None,
+) -> dict[str, pd.DataFrame]:
+    """Download OHLCV via yfinance. Returns dict sym -> DataFrame."""
+    try:
+        import yfinance as yf
+    except ImportError:
+        raise ImportError("yfinance not installed. pip install yfinance")
+
+    out: dict[str, pd.DataFrame] = {}
+    for s in symbols:
+        df = yf.download(s, start=start, end=end, progress=False, auto_adjust=True)
+        if df.empty:
+            continue
+        # Flatten potential MultiIndex from yfinance
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = [c[0] if isinstance(c, tuple) else c for c in df.columns]
+        df.columns = [c.lower() for c in df.columns]
+        needed = ["open", "high", "low", "close", "volume"]
+        if not all(c in df.columns for c in needed):
+            continue
+        out[s] = df[needed].dropna()
+    return out
