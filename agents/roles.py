@@ -77,6 +77,9 @@ The signal_code field must be a SINGLE Python expression that, given a
 pandas DataFrame `df` with columns ['open','high','low','close','volume']
 indexed by date, returns a pandas Series of positions in [-1, 1].
 
+Do NOT put complex code, assignments, or multi-line code in signal_code.
+Keep it simple, e.g., "1.0" for long-only, or "(df['close'] > df['close'].rolling(50).mean()).astype(float)".
+
 Respond ONLY with JSON matching the StrategySpec schema.""",
 
     # ----------------------- WRITER -------------------------

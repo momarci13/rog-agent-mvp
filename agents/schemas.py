@@ -75,8 +75,8 @@ class Outline(BaseModel):
 # ---------- Critic ----------
 
 class Critique(BaseModel):
-    grounded: bool
-    numerics_ok: bool
+    grounded: bool | None = None
+    numerics_ok: bool | None = None
     code_runs: bool | None = None
     issues: list[str] = Field(default_factory=list)
     accept: bool
