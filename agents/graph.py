@@ -12,6 +12,7 @@ from rag.hybrid import LiteHybridRAG
 
 from .llm import OllamaLLM
 from . import roles
+from ..tools import scholar
 
 
 @dataclass
@@ -48,9 +49,30 @@ def run(
     state.task_type = p.task_type
     state.subtasks = p.subtasks
 
+    # 1.5. SCHOLAR AUGMENTATION: Search arXiv for relevant papers
+    papers, scholar_context = [], ""
+    try:
+        papers, scholar_context = scholar.scholar_augment_task(task, n_papers=5)
+        if papers:
+            chunks_added = rag.ingest_papers(papers)
+            print(f"[GRAPH] Ingested {len(papers)} papers ({chunks_added} chunks) into KB")
+        else:
+            print("[GRAPH] No relevant papers found for scholar augmentation")
+    except Exception as e:
+        print(f"[GRAPH] Scholar augmentation failed, continuing without it: {e}")
+        scholar_context = ""
+
     while state.iterations < max_iter and not state.accepted:
         state.iterations += 1
         docs = rag.retrieve(task, k=6)
+        
+        # Add scholar context if available
+        if scholar_context:
+            docs.insert(0, {
+                "id": "scholar_context",
+                "text": scholar_context,
+                "meta": {"kind": "scholar", "source": "arxiv_dynamic"}
+            })
 
         # 2. EXECUTE according to task type
         if state.task_type == "data_science":

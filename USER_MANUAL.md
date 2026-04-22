@@ -264,6 +264,33 @@ python run.py --ingest ~/Documents/finance-papers/
 Supported: `.pdf`, `.md`, `.txt`, `.tex`, `.bib`. Other extensions are
 silently skipped.
 
+### Dynamic scholar augmentation
+
+For research tasks, the system automatically searches arXiv for relevant
+academic papers and adds them to your KB **for that task only**. This
+happens transparently after planning.
+
+**How it works:**
+1. Task description is analyzed for keywords (e.g., "momentum strategy"
+   → "momentum", "strategy", "finance").
+2. arXiv API queried for papers in quantitative finance (`q-fin` category).
+3. Top 5 papers fetched, converted to markdown, chunked, and indexed.
+4. Papers are retrieved alongside your static KB during execution.
+5. Papers remain in KB for future tasks (no cleanup needed).
+
+**Benefits:**
+- Access to cutting-edge research without manual curation.
+- Citations from recent papers (2020+) in writing tasks.
+- No API keys needed (arXiv is public).
+
+**Limitations:**
+- Only quantitative finance papers (`q-fin` category).
+- Requires internet connection.
+- arXiv search is keyword-based, not semantic.
+
+If no papers are found or network fails, the system continues with your
+static KB only.
+
 ### What gets indexed
 
 - **PDF / MD / TXT / TEX**: split into ~256-token chunks with 32-token

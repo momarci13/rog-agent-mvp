@@ -2,10 +2,28 @@
 from __future__ import annotations
 
 import re
+import time
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 
 import requests
+
+
+def _retry_request(url: str, params: dict, max_retries: int = 3, backoff: float = 1.0) -> requests.Response | None:
+    """Retry HTTP request with exponential backoff."""
+    for attempt in range(max_retries):
+        try:
+            response = requests.get(url, params=params, timeout=15)
+            response.raise_for_status()
+            return response
+        except requests.RequestException as e:
+            if attempt == max_retries - 1:
+                print(f"[SCHOLAR] Request failed after {max_retries} attempts: {e}")
+                return None
+            wait_time = backoff * (2 ** attempt)
+            print(f"[SCHOLAR] Request failed (attempt {attempt + 1}/{max_retries}), retrying in {wait_time:.1f}s: {e}")
+            time.sleep(wait_time)
+    return None
 
 
 @dataclass
@@ -84,9 +102,10 @@ def search_arxiv(
     }
 
     try:
-        response = requests.get(base_url, params=params, timeout=10)
-        response.raise_for_status()
-    except requests.RequestException as e:
+        response = _retry_request(base_url, params)
+        if response is None:
+            return []
+    except Exception as e:
         print(f"[SCHOLAR] arXiv search failed: {e}")
         return []
 
@@ -149,39 +168,51 @@ def scholar_augment_task(
     Returns:
         (list of papers, markdown context string for LLM)
     """
-    keywords = extract_keywords(task_description)
+    try:
+        print(f"[SCHOLAR] Analyzing task: '{task_description[:50]}...'")
+        keywords = extract_keywords(task_description)
 
-    if not keywords:
-        return [], ""
+        if not keywords:
+            print("[SCHOLAR] No suitable keywords found in task description")
+            return [], ""
 
-    print(f"[SCHOLAR] Searching arXiv for: {' '.join(keywords)}")
+        query = " ".join(keywords[:5])
+        print(f"[SCHOLAR] Searching arXiv for: '{query}' in category '{category}'")
 
-    papers = search_arxiv(
-        query=" ".join(keywords[:5]),
-        n=n_papers,
-        category=category,
-    )
+        papers = search_arxiv(
+            query=query,
+            n=n_papers,
+            category=category,
+        )
 
-    if not papers:
-        print("[SCHOLAR] No papers found")
-        return [], ""
+        if not papers:
+            print(f"[SCHOLAR] No papers found for query '{query}' in category '{category}'")
+            return [], ""
 
-    print(f"[SCHOLAR] Found {len(papers)} papers")
+        print(f"[SCHOLAR] Successfully retrieved {len(papers)} papers")
+        for paper in papers[:3]:  # Show first 3 papers
+            print(f"[SCHOLAR]   - {paper.title[:60]}... ({paper.arxiv_id})")
 
-    context = f"""## Recently Retrieved Academic Papers (arXiv)
+        context = f"""## Recently Retrieved Academic Papers (arXiv)
 
-The following {len(papers)} papers are relevant to your task:
+The following {len(papers)} papers are relevant to your task (searched for: {query}):
 
 """
-    for i, paper in enumerate(papers, 1):
-        authors_str = ", ".join(paper.authors[:2])
-        context += f"""{i}. **{paper.title}**  
+        for i, paper in enumerate(papers, 1):
+            authors_str = ", ".join(paper.authors[:2])
+            if len(paper.authors) > 2:
+                authors_str += " et al."
+            context += f"""{i}. **{paper.title}**  
    {authors_str}  
    arXiv:{paper.arxiv_id} ({paper.published})  
 
 """
 
-    return papers, context
+        return papers, context
+
+    except Exception as e:
+        print(f"[SCHOLAR] Unexpected error during scholar augmentation: {e}")
+        return [], ""
 
 
 def extract_keywords(text: str, max_keywords: int = 5) -> list[str]:

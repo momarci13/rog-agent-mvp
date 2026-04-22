@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import os
 import pickle
+import re
 from pathlib import Path
 from typing import Iterator
 
@@ -38,9 +39,13 @@ except Exception as e:  # pragma: no cover
     raise ImportError("rank-bm25 is required. Install: pip install rank-bm25") from e
 
 try:
-    import tiktoken
-except Exception as e:  # pragma: no cover
-    raise ImportError("tiktoken is required. Install: pip install tiktoken") from e
+    from functools import lru_cache
+except ImportError:
+    # Python < 3.2
+    def lru_cache(maxsize=128):
+        def decorator(func):
+            return func
+        return decorator
 
 try:
     from nltk.corpus import stopwords
@@ -104,6 +109,11 @@ class LiteHybridRAG:
         self._texts: list[str] = []
         self._metas: list[dict] = []
         self._bm25_path = Path(db_path) / f"{collection}_bm25.pkl"
+        
+        # Query result cache for performance
+        self._query_cache: dict[str, list[dict]] = {}
+        self._cache_max_size = 100
+        
         self._load_bm25_cache()
 
     # ---------------- ingestion ----------------
@@ -123,6 +133,120 @@ class LiteHybridRAG:
         self._texts.extend(texts)
         self._metas.extend(metas)
         self._rebuild_bm25()
+        
+        # Clear query cache since KB changed
+        self._query_cache.clear()
+
+    def ingest_papers(self, papers: list) -> int:
+        """Ingest arXiv papers into the KB.
+        
+        Args:
+            papers: List of ArxivPaper objects
+            
+        Returns:
+            Number of chunks added
+        """
+        if not papers:
+            return 0
+            
+        total_chunks = 0
+        for paper in papers:
+            # Generate markdown content
+            content = paper.to_markdown()
+            
+            # Chunk the content
+            chunks = self._chunk_text(content, target_tokens=256, overlap=32)
+            
+            # Create docs
+            docs = []
+            for i, chunk in enumerate(chunks):
+                chunk_id = f"arxiv::{paper.arxiv_id}::{i}"
+                docs.append({
+                    "id": chunk_id,
+                    "text": chunk,
+                    "meta": {
+                        "kind": "doc",
+                        "source": f"arxiv:{paper.arxiv_id}",
+                        "chunk": i,
+                        "title": paper.title,
+                        "authors": ", ".join(paper.authors),
+                        "year": paper.published.split("-")[0] if paper.published != "unknown" else None,
+                        "url": paper.url,
+                    }
+                })
+            
+            # Add to RAG
+            self.add(docs)
+            total_chunks += len(docs)
+            
+        return total_chunks
+
+    def _chunk_text(self, text: str, target_tokens: int = 256, overlap: int = 32) -> list[str]:
+        """Token-aware chunker using tiktoken for accurate token counting."""
+        paragraphs = re.split(r"\n\s*\n", text.strip())
+        chunks: list[str] = []
+        buf = ""
+        overlap_budget = overlap  # tokens to preserve for overlap
+
+        for p in paragraphs:
+            if not p.strip():
+                continue
+
+            # Check if adding this paragraph to buffer would exceed target
+            if buf:
+                candidate = buf + "\n\n" + p
+            else:
+                candidate = p
+            
+            tokens_candidate = _count_tokens(candidate)
+
+            if tokens_candidate <= target_tokens:
+                # Fits within budget, add to buffer
+                buf = candidate
+            else:
+                # Would exceed budget
+                if buf:
+                    chunks.append(buf)
+                
+                # Check if paragraph alone fits
+                tokens_p = _count_tokens(p)
+                if tokens_p > target_tokens:
+                    # Paragraph too long; split on sentences
+                    sentences = re.split(r'(?<=[.!?])\s+', p)
+                    sub_buf = ""
+                    for sent in sentences:
+                        cand = (sub_buf + " " + sent).strip() if sub_buf else sent
+                        if _count_tokens(cand) <= target_tokens:
+                            sub_buf = cand
+                        else:
+                            if sub_buf:
+                                chunks.append(sub_buf)
+                            sub_buf = sent
+                    if sub_buf:
+                        chunks.append(sub_buf)
+                    buf = ""
+                else:
+                    # Paragraph fits alone; prepare overlap
+                    # Take tail of previous buffer for overlap context
+                    words = buf.split()
+                    overlap_words = []
+                    overlap_tokens_current = 0
+                    for word in reversed(words):
+                        test_seq = " ".join([word] + overlap_words)
+                        if _count_tokens(test_seq) <= overlap_budget:
+                            overlap_words.insert(0, word)
+                            overlap_tokens_current = _count_tokens(test_seq)
+                        else:
+                            break
+                    
+                    if overlap_words:
+                        buf = " ".join(overlap_words) + "\n\n" + p
+                    else:
+                        buf = p
+
+        if buf:
+            chunks.append(buf)
+        return [c for c in chunks if c.strip()]
 
     def _rebuild_bm25(self) -> None:
         tokens = [_tokenize_stem(t) for t in self._texts]
@@ -173,6 +297,11 @@ class LiteHybridRAG:
         if not self._ids:
             return []
 
+        # Create cache key
+        cache_key = f"{query}|{k}|{m}|{token_budget}|{str(metadata_filters)}"
+        if cache_key in self._query_cache:
+            return self._query_cache[cache_key]
+
         m = min(m, len(self._ids))
 
         # Apply metadata filtering
@@ -213,16 +342,19 @@ class LiteHybridRAG:
         if not valid_indices:
             return []
 
-        # Dense
+        # Dense retrieval: get top-m candidates
         qv = self.emb.encode([query], normalize_embeddings=True).tolist()
-        dres = self.col.query(query_embeddings=qv, n_results=len(self._ids))
+        dres = self.col.query(query_embeddings=qv, n_results=m)
         # chroma returns distances in cosine distance space (1 - cos)
         d_ids = dres["ids"][0]
         d_dist = dres["distances"][0]
-        dense_scores = {
-            i: max(0.0, 1.0 - float(dist)) for i, dist in zip(d_ids, d_dist)
-            if self._ids.index(i) in valid_indices
-        }
+        
+        # Filter by metadata and build dense scores
+        dense_scores = {}
+        for i, dist in zip(d_ids, d_dist):
+            idx = self._ids.index(i)
+            if idx in valid_indices:
+                dense_scores[i] = max(0.0, 1.0 - float(dist))
 
         # BM25
         bm25_scores: dict[str, float] = {}
@@ -267,6 +399,14 @@ class LiteHybridRAG:
                 "score": score,
             })
             used += approx_tokens
+        
+        # Cache result
+        if len(self._query_cache) >= self._cache_max_size:
+            # Simple eviction: remove oldest (first inserted)
+            oldest_key = next(iter(self._query_cache))
+            del self._query_cache[oldest_key]
+        self._query_cache[cache_key] = selected
+        
         return selected
 
     # ---------------- introspection ----------------
@@ -290,3 +430,6 @@ class LiteHybridRAG:
         self._bm25 = None
         if self._bm25_path.exists():
             os.remove(self._bm25_path)
+        
+        # Clear query cache
+        self._query_cache.clear()
