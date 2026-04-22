@@ -645,6 +645,7 @@ python run.py --ingest ~/path/to/your/papers/
 python run.py "Compute volatility of SPY 2020-2024"
 python run.py "Backtest 50/200 SMA crossover on SPY since 2015"
 python run.py "Write a 4-page report on the momentum anomaly"
+python run.py --kan-demo    # run the built-in generic Multifidelity KAN demo
 
 # Tests
 pytest tests/test_risk.py tests/test_backtest.py    # fast, no models

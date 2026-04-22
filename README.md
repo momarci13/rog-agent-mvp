@@ -89,6 +89,7 @@ Then:
 ```bash
 python run.py --ingest data/papers/                                   # build KB (~30 s)
 python run.py "Backtest a 50/200 SMA crossover on SPY since 2015"     # ~1-3 min
+python run.py --kan-demo                                                # run a built-in multifidelity KAN demo
 ```
 
 ## Repository layout

@@ -182,12 +182,24 @@ def ingest_file(path: Path, rag: LiteHybridRAG, chunk_tokens: int = 256) -> int:
 
     chunks = chunk_text(text, target_tokens=chunk_tokens)
     docs = []
+    topic = None
+    if path.stem in {
+        "stochastics_probability",
+        "bayesian_methods",
+        "markov_chains",
+        "stochastic_processes_finance",
+    }:
+        topic = path.stem
+
     for i, ch in enumerate(chunks):
         h = hashlib.md5(f"{path.name}::{i}".encode()).hexdigest()[:12]
+        meta = {"source": path.name, "chunk": i, "kind": "doc"}
+        if topic:
+            meta["topic"] = topic
         docs.append({
             "id": f"{path.stem}::{h}",
             "text": ch,
-            "meta": {"source": path.name, "chunk": i, "kind": "doc"},
+            "meta": meta,
         })
     rag.add(docs)
     return len(docs)

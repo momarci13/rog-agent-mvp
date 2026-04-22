@@ -18,15 +18,17 @@ from pathlib import Path
 
 import yaml
 
-from agents.graph import run
 from agents.llm import LLMConfig, OllamaLLM
-from rag.hybrid import LiteHybridRAG
-from rag.ingest import ingest_path
 from tools.backtest import (
     BacktestConfig,
     compile_signal,
     fetch_yahoo,
     run_portfolio_backtest,
+)
+from tools.multifidelity_kan import (
+    ResidualKAN,
+    evaluate_regression,
+    generate_multifidelity_dataset,
 )
 from tools.sandbox import run_py
 from tools.tex import build_latex_artifact
@@ -96,7 +98,33 @@ def _lookback_start(days: int) -> str:
     return (dt.date.today() - dt.timedelta(days=max(days, 365) + 60)).isoformat()
 
 
+def run_kan_demo(samples: int = 400, random_state: int = 123) -> dict[str, Any]:
+    data = generate_multifidelity_dataset(
+        n_samples=samples,
+        n_low_features=3,
+        n_high_features=4,
+        noise_low=0.45,
+        noise_high=0.18,
+        random_state=random_state,
+    )
+    model = ResidualKAN()
+    model.fit(data["X_low"], data["y_low"], data["X_high"], data["y_high"])
+
+    y_pred = model.predict(data["X_low"], data["X_high"])
+    baseline_pred = model.predict_low(data["X_low"])
+
+    return {
+        "kan_metrics": evaluate_regression(data["y_high"], y_pred),
+        "baseline_metrics": evaluate_regression(data["y_high"], baseline_pred),
+        "n_samples": samples,
+        "low_features": data["X_low"].shape[1],
+        "high_features": data["X_high"].shape[1],
+    }
+
+
 def healthcheck(cfg: dict) -> int:
+    from rag.hybrid import LiteHybridRAG
+
     print("== ROG-Agent healthcheck ==")
     llm_cfg = LLMConfig(
         model=cfg["llm"]["model"],
@@ -152,6 +180,7 @@ def main():
     ap.add_argument("task", nargs="?", help="natural-language task")
     ap.add_argument("--ingest", metavar="PATH", help="ingest files/dir into the KB")
     ap.add_argument("--healthcheck", action="store_true")
+    ap.add_argument("--kan-demo", action="store_true", help="Run a built-in Multifidelity KAN demo")
     ap.add_argument("--config", default="configs/config.yaml")
     ap.add_argument("--max-iter", type=int, default=None)
     ap.add_argument("--out", default="output")
@@ -163,6 +192,9 @@ def main():
         sys.exit(healthcheck(cfg))
 
     if args.ingest:
+        from rag.hybrid import LiteHybridRAG
+        from rag.ingest import ingest_path
+
         rag = LiteHybridRAG(
             db_path=cfg["rag"]["db_path"],
             embedding_model=cfg["rag"]["embedding_model"],
@@ -172,9 +204,25 @@ def main():
         print(f"Done. Collection now has {len(rag)} chunks (+{n} new).")
         return
 
+    if args.kan_demo:
+        demo = run_kan_demo()
+        print("\n▶ Multifidelity KAN demo results")
+        print(f"Samples: {demo['n_samples']}")
+        print(f"Low features: {demo['low_features']}, high features: {demo['high_features']}")
+        print("Baseline metrics:")
+        for k, v in demo["baseline_metrics"].items():
+            print(f"  {k}: {v:.6f}")
+        print("KAN metrics:")
+        for k, v in demo["kan_metrics"].items():
+            print(f"  {k}: {v:.6f}")
+        return
+
     if not args.task:
         ap.print_help()
         return
+
+    from agents.graph import run
+    from rag.hybrid import LiteHybridRAG
 
     # Build services
     llm = OllamaLLM(LLMConfig(

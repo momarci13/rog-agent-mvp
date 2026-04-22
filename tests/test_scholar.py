@@ -12,6 +12,7 @@ import pytest
 
 pytest.importorskip("chromadb")
 pytest.importorskip("sentence_transformers")
+pytest.importorskip("rank_bm25")
 
 from rag.hybrid import LiteHybridRAG
 from tools.scholar import scholar_augment_task, ArxivPaper
@@ -143,6 +144,31 @@ def test_arxiv_paper_to_markdown():
     assert "**Published:** 2024-01-15" in markdown
     assert "This is a test abstract." in markdown
     assert "*Source: arXiv. Retrieved dynamically*" in markdown
+
+
+def test_search_arxiv_accepts_multiple_categories(monkeypatch, mock_arxiv_response):
+    """Test search_arxiv with multiple math/stat categories."""
+    called = {}
+
+    def fake_retry(url, params, max_retries=3, backoff=1.0):
+        called['params'] = params
+        mock_response = MagicMock()
+        mock_response.content = mock_arxiv_response.encode('utf-8')
+        return mock_response
+
+    monkeypatch.setattr('tools.scholar._retry_request', fake_retry)
+
+    from tools.scholar import search_arxiv
+    papers = search_arxiv(
+        query="bayesian inference",
+        n=1,
+        category=["math.PR", "stat.AP"],
+    )
+
+    assert len(papers) == 1
+    assert "bayesian" in called['params']['search_query']
+    assert "cat:math.PR" in called['params']['search_query']
+    assert "cat:stat.AP" in called['params']['search_query']
 
 
 def test_arxiv_paper_to_bibtex():

@@ -25,6 +25,10 @@ def _retry_request(url: str, params: dict, max_retries: int = 3, backoff: float 
             time.sleep(wait_time)
     return None
 
+DEFAULT_SEARCH_CATEGORIES = ["q-fin", "stat.ML", "math.PR", "math.ST", "stat.AP"]
+MATH_SEARCH_CATEGORIES = ["math.PR", "math.ST", "stat.AP", "stat.ML", "q-fin"]
+FINANCE_SEARCH_CATEGORIES = ["q-fin", "stat.ML", "math.ST"]
+
 
 @dataclass
 class ArxivPaper:
@@ -77,7 +81,7 @@ class ArxivPaper:
 def search_arxiv(
     query: str,
     n: int = 5,
-    category: str = "q-fin",
+    category: str | list[str] = "q-fin",
     sort_by: str = "relevance",
 ) -> list[ArxivPaper]:
     """Search arXiv for papers.
@@ -85,14 +89,20 @@ def search_arxiv(
     Args:
         query: Search query (title, abstract, authors)
         n: Number of papers to return
-        category: arXiv category ("q-fin" for finance, "cs.LG" for ML, "stat.AP" for stats)
+        category: arXiv category or categories to search
         sort_by: Sort order ("relevance" or "submittedDate")
 
     Returns:
         List of ArxivPaper objects
     """
+    if isinstance(category, str):
+        categories = [category]
+    else:
+        categories = list(category)
+
+    category_query = " OR ".join(f"cat:{c}" for c in categories)
     base_url = "http://export.arxiv.org/api/query?"
-    search_query = f"({query}) AND cat:{category}"
+    search_query = f"({query}) AND ({category_query})"
     params = {
         "search_query": search_query,
         "start": 0,
@@ -177,12 +187,32 @@ def scholar_augment_task(
             return [], ""
 
         query = " ".join(keywords[:5])
-        print(f"[SCHOLAR] Searching arXiv for: '{query}' in category '{category}'")
+        keyset = set(keywords)
+        math_terms = {
+            "probability", "probabilistic", "bayesian", "bayes", "markov",
+            "stochastic", "martingale", "ergodic", "random", "distribution",
+            "likelihood", "posterior", "prior", "infer", "inference",
+        }
+        finance_terms = {
+            "finance", "trading", "strategy", "risk", "portfolio", "returns",
+            "backtest", "volatility", "leverage", "alpha", "beta", "market",
+        }
+
+        if category != "q-fin":
+            search_categories = [category] if isinstance(category, str) else list(category)
+        elif keyset & math_terms:
+            search_categories = MATH_SEARCH_CATEGORIES
+        elif keyset & finance_terms:
+            search_categories = FINANCE_SEARCH_CATEGORIES
+        else:
+            search_categories = DEFAULT_SEARCH_CATEGORIES
+
+        print(f"[SCHOLAR] Searching arXiv for: '{query}' in categories {search_categories}")
 
         papers = search_arxiv(
             query=query,
             n=n_papers,
-            category=category,
+            category=search_categories,
         )
 
         if not papers:

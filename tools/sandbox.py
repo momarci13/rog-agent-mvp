@@ -39,6 +39,9 @@ def run_py(
     env = os.environ.copy()
     if extra_env:
         env.update(extra_env)
+    repo_root = Path(__file__).resolve().parents[1]
+    existing_pythonpath = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = str(repo_root) + (os.pathsep + existing_pythonpath if existing_pythonpath else "")
     env["PYTHONDONTWRITEBYTECODE"] = "1"
 
     preexec = None
