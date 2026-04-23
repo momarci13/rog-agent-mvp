@@ -182,7 +182,7 @@ RAG retrieve  ── hybrid (BM25 + dense), top-k under token budget
    │
    ▼
 EXECUTE role appropriate to task type:
-   • data_science      → DS prompt → code → sandbox.run_py
+   • data_science      → DS prompt → code (Python/R) → sandbox.run_py (Python only)
    • trading_research  → QUANT prompt → StrategySpec JSON → backtest
    • writing           → outline → per-section drafts → LaTeX assemble
    │

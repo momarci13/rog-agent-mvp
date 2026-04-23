@@ -15,7 +15,7 @@ to 4 GB VRAM or pure CPU.
 - **Three executor roles** sharing one warm model via system-prompt
   switching:
   - *Data Science* — pandas/statsmodels code generation, sandboxed
-    execution, structured output.
+    execution, structured output. Supports Python and R code generation.
   - *Trading Research* — produces typed `StrategySpec` JSON, runs an
     event-driven backtest, computes Sharpe / Sortino / **Deflated
     Sharpe** / MDD / VaR.

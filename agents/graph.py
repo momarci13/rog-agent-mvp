@@ -90,12 +90,18 @@ def run(
                 if parts:
                     feedback = "\n\n".join(parts) + "\n\nFix these issues in your revised code."
             code_md = roles.analyze(llm, task, docs, feedback=feedback)
-            code = _extract_code(code_md)
+            lang, code = _extract_code(code_md)
             if code:
-                code = _NUMPY_COMPAT + "\n" + code
+                if lang == "python":
+                    code = _NUMPY_COMPAT + "\n" + code
+                elif lang == "r":
+                    code = _R_COMPAT + "\n" + code
             run_result = {"code": "", "stdout": "", "stderr": "", "returncode": None}
-            if tools.get("run_py") and code:
+            if tools.get("run_py") and code and lang == "python":
                 run_result = tools["run_py"](code)
+                run_result["code"] = code
+            elif lang == "r":
+                # For R, just store the code without execution
                 run_result["code"] = code
             state.artifacts.append({"type": "ds", "payload": run_result, "raw": code_md})
 
@@ -182,16 +188,33 @@ except ImportError:
     pass
 """
 
+# R compatibility patches for common LLM codegen issues
+_R_COMPAT = """\
+# Load tidyverse if available
+if (!require(tidyverse, quietly = TRUE)) {
+  install.packages("tidyverse", repos = "https://cran.rstudio.com/")
+  library(tidyverse)
+}
+# Load quantmod for financial data if available
+if (!require(quantmod, quietly = TRUE)) {
+  install.packages("quantmod", repos = "https://cran.rstudio.com/")
+  library(quantmod)
+}
+"""
 
-def _extract_code(md: str) -> str:
-    """Pull the first ```python block out of markdown."""
+
+def _extract_code(md: str) -> tuple[str, str]:
+    """Pull the first code block out of markdown, detecting language."""
+    if "```r" in md:
+        body = md.split("```r", 1)[1]
+        return "r", body.split("```", 1)[0].strip()
     if "```python" in md:
         body = md.split("```python", 1)[1]
-        return body.split("```", 1)[0].strip()
+        return "python", body.split("```", 1)[0].strip()
     if "```" in md:
         body = md.split("```", 1)[1]
-        return body.split("```", 1)[0].strip()
-    return md.strip()
+        return "unknown", body.split("```", 1)[0].strip()
+    return "unknown", md.strip()
 
 
 def _collect_bib_keys(rag: LiteHybridRAG) -> list[str]:
