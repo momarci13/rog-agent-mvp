@@ -61,9 +61,14 @@ except Exception as e:  # pragma: no cover
 
 # -------------- tokenization & stemming ----------------
 
+try:
+    import tiktoken
+    _tiktoken_enc = tiktoken.get_encoding("cl100k_base")
+except Exception:
+    _tiktoken_enc = None
+
 _stemmer = PorterStemmer()
 _stopwords = set(stopwords.words('english'))
-_tiktoken_enc = tiktoken.get_encoding("cl100k_base")
 
 
 def _tokenize_stem(text: str) -> list[str]:
@@ -75,11 +80,13 @@ def _tokenize_stem(text: str) -> list[str]:
 
 def _count_tokens(text: str) -> int:
     """Count tokens using tiktoken (more accurate than ÷4 heuristic)."""
-    try:
-        return len(_tiktoken_enc.encode(text))
-    except Exception:
-        # Fallback to rough estimate if encoding fails
-        return max(1, len(text) // 4)
+    if _tiktoken_enc is not None:
+        try:
+            return len(_tiktoken_enc.encode(text))
+        except Exception:
+            pass
+    # Fallback to rough estimate if tiktoken is unavailable or encoding fails
+    return max(1, len(text) // 4)
 
 
 class LiteHybridRAG:

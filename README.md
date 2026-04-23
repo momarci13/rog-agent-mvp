@@ -1,5 +1,5 @@
 # ROG-Agent MVP
-
+python -m uvicorn server:app --reload --host 127.0.0.1 --port 8000
 A laptop-grade **multi-agent RAG system** for data science, quantitative
 trading research, and academic writing — running entirely on a local
 free LLM via Ollama.
@@ -90,6 +90,7 @@ Then:
 python run.py --ingest data/papers/                                   # build KB (~30 s)
 python run.py "Backtest a 50/200 SMA crossover on SPY since 2015"     # ~1-3 min
 python run.py --kan-demo                                                # run a built-in multifidelity KAN demo
+python -m uvicorn server:app --reload --host 127.0.0.1 --port 8000    # launch the local web UI
 ```
 
 ## Repository layout

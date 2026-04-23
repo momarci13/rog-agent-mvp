@@ -1,0 +1,101 @@
+:root {
+  font-family: Inter, system-ui, sans-serif;
+  color: #111827;
+  background: #f5f7fb;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+}
+
+header {
+  padding: 2rem;
+  background: linear-gradient(135deg, #1f2937, #111827);
+  color: #fff;
+}
+
+header h1 {
+  margin: 0 0 0.5rem;
+  font-size: clamp(2rem, 2.5vw, 2.8rem);
+}
+
+header p {
+  margin: 0;
+  max-width: 720px;
+  line-height: 1.6;
+}
+
+main {
+  padding: 2rem;
+  display: grid;
+  gap: 1.5rem;
+}
+
+.card {
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 16px;
+  padding: 1.5rem;
+  box-shadow: 0 16px 32px rgba(15, 23, 42, 0.08);
+}
+
+.card.horizontal {
+  display: grid;
+  grid-template-columns: 1.75fr 1fr;
+  gap: 1.5rem;
+}
+
+textarea,
+input[type="text"] {
+  width: 100%;
+  border: 1px solid #d1d5db;
+  border-radius: 0.75rem;
+  padding: 0.9rem 1rem;
+  font-size: 1rem;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+textarea {
+  min-height: 140px;
+}
+
+button {
+  margin-top: 0.75rem;
+  padding: 0.85rem 1.25rem;
+  border: none;
+  border-radius: 0.85rem;
+  background: #2563eb;
+  color: white;
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+button:hover {
+  background: #1d4ed8;
+}
+
+pre {
+  margin: 1rem 0 0;
+  background: #111827;
+  color: #f9fafb;
+  border-radius: 1rem;
+  padding: 1rem;
+  overflow-x: auto;
+  max-height: 320px;
+}
+
+ul {
+  margin: 0.75rem 0 0;
+  padding-left: 1.1rem;
+}
+
+li {
+  margin-bottom: 0.6rem;
+  cursor: pointer;
+}
+
+li:hover {
+  color: #2563eb;
+}
