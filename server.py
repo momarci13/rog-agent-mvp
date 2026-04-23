@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from run import load_config, make_tools, run_kan_demo
+from run import load_config, make_llm_config, make_tools, run_kan_demo
 from agents.llm import LLMConfig, OllamaLLM
 from tools.backtest import BacktestConfig, compile_signal, fetch_yahoo, run_portfolio_backtest
 
@@ -36,13 +36,7 @@ def _config() -> dict[str, Any]:
 
 
 def _llm(cfg: dict[str, Any]) -> OllamaLLM:
-    llm_cfg = LLMConfig(
-        model=cfg["llm"]["model"],
-        host=cfg["llm"]["host"],
-        num_ctx=cfg["llm"]["num_ctx"],
-        temperature=cfg["llm"]["temperature"],
-        timeout_s=cfg["llm"]["timeout_s"],
-    )
+    llm_cfg = make_llm_config(cfg)
     return OllamaLLM(llm_cfg)
 
 
@@ -55,6 +49,13 @@ def _rag(cfg: dict[str, Any]):
         db_path=cfg["rag"]["db_path"],
         embedding_model=cfg["rag"]["embedding_model"],
         alpha_dense=cfg["rag"]["alpha_dense"],
+        query_expansion_enabled=cfg["rag"]["query_expansion"]["enabled"],
+        query_expansion_method=cfg["rag"]["query_expansion"]["method"],
+        max_expansions=cfg["rag"]["query_expansion"]["max_expansions"],
+        reranking_enabled=cfg["rag"]["reranking"]["enabled"],
+        reranking_model=cfg["rag"]["reranking"]["model"],
+        top_k_before_rerank=cfg["rag"]["reranking"]["top_k_before_rerank"],
+        top_k_after_rerank=cfg["rag"]["reranking"]["top_k_after_rerank"],
     )
 
 
@@ -131,6 +132,13 @@ async def ingest(payload: IngestRequest) -> dict[str, Any]:
         db_path=cfg["rag"]["db_path"],
         embedding_model=cfg["rag"]["embedding_model"],
         alpha_dense=cfg["rag"]["alpha_dense"],
+        query_expansion_enabled=cfg["rag"]["query_expansion"]["enabled"],
+        query_expansion_method=cfg["rag"]["query_expansion"]["method"],
+        max_expansions=cfg["rag"]["query_expansion"]["max_expansions"],
+        reranking_enabled=cfg["rag"]["reranking"]["enabled"],
+        reranking_model=cfg["rag"]["reranking"]["model"],
+        top_k_before_rerank=cfg["rag"]["reranking"]["top_k_before_rerank"],
+        top_k_after_rerank=cfg["rag"]["reranking"]["top_k_after_rerank"],
     )
     n = ingest_path(payload.path, rag, chunk_tokens=cfg["rag"]["chunk_tokens"])
     return {"status": "ok", "chunks": len(rag), "added": n}

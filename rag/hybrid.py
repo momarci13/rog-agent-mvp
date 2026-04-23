@@ -96,11 +96,27 @@ class LiteHybridRAG:
         collection: str = "main",
         embedding_model: str = "BAAI/bge-small-en-v1.5",
         alpha_dense: float = 0.6,
+        query_expansion_enabled: bool = False,
+        query_expansion_method: str = "local_model",
+        max_expansions: int = 3,
+        reranking_enabled: bool = False,
+        reranking_model: str = "local_cross_encoder",
+        top_k_before_rerank: int = 50,
+        top_k_after_rerank: int = 6,
     ):
         Path(db_path).mkdir(parents=True, exist_ok=True)
         self.db_path = db_path
         self.collection_name = collection
         self.alpha = alpha_dense
+
+        # New RAG enhancement options
+        self.query_expansion_enabled = query_expansion_enabled
+        self.query_expansion_method = query_expansion_method
+        self.max_expansions = max_expansions
+        self.reranking_enabled = reranking_enabled
+        self.reranking_model = reranking_model
+        self.top_k_before_rerank = top_k_before_rerank
+        self.top_k_after_rerank = top_k_after_rerank
 
         self.client = chromadb.PersistentClient(
             path=db_path,
@@ -109,6 +125,11 @@ class LiteHybridRAG:
         self.col = self.client.get_or_create_collection(collection)
 
         self.emb = SentenceTransformer(embedding_model)
+
+        # Load reranking model if enabled
+        self.reranker = None
+        if self.reranking_enabled:
+            self._load_reranker()
 
         # BM25 is rebuilt from chroma on load, cached to disk.
         self._bm25: BM25Okapi | None = None
@@ -122,6 +143,89 @@ class LiteHybridRAG:
         self._cache_max_size = 100
         
         self._load_bm25_cache()
+
+    def _load_reranker(self):
+        """Load the reranking model."""
+        try:
+            if self.reranking_model == "local_cross_encoder":
+                from sentence_transformers import CrossEncoder
+                self.reranker = CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')
+            # TODO: Add Cohere API support
+            elif self.reranking_model.startswith("cohere"):
+                # Placeholder for Cohere integration
+                self.reranker = None
+            else:
+                print(f"Unknown reranking model: {self.reranking_model}")
+                self.reranker = None
+        except Exception as e:
+            print(f"Failed to load reranker: {e}")
+            self.reranker = None
+
+    def _expand_query(self, query: str) -> list[str]:
+        """Expand the query with related terms."""
+        if not self.query_expansion_enabled:
+            return [query]
+
+        expansions = [query]  # Always include original
+
+        try:
+            if self.query_expansion_method == "local_model":
+                # Use simple rule-based expansion for now
+                # TODO: Integrate with Ollama for better expansion
+                expansions.extend(self._rule_based_expansion(query))
+            elif self.query_expansion_method == "cohere":
+                # TODO: Implement Cohere API expansion
+                pass
+        except Exception as e:
+            print(f"Query expansion failed: {e}")
+
+        return expansions[:self.max_expansions + 1]  # +1 for original
+
+    def _rule_based_expansion(self, query: str) -> list[str]:
+        """Simple rule-based query expansion."""
+        # Basic synonym expansion
+        synonyms = {
+            "stock": ["equity", "share", "security"],
+            "return": ["performance", "yield", "profit"],
+            "volatility": ["risk", "variance", "fluctuation"],
+            "strategy": ["approach", "method", "tactic"],
+            "market": ["exchange", "trading", "financial"],
+        }
+
+        expanded = []
+        words = query.lower().split()
+        for word in words:
+            if word in synonyms:
+                for syn in synonyms[word][:2]:  # Limit to 2 synonyms per word
+                    new_query = query.lower().replace(word, syn)
+                    expanded.append(new_query)
+
+        return expanded
+
+    def _rerank_results(self, query: str, candidates: list[dict]) -> list[dict]:
+        """Re-rank candidates using cross-encoder."""
+        if not self.reranking_enabled or self.reranker is None or len(candidates) <= self.top_k_after_rerank:
+            return candidates
+
+        try:
+            # Prepare query-doc pairs
+            query_doc_pairs = [(query, doc["text"]) for doc in candidates[:self.top_k_before_rerank]]
+
+            # Get reranker scores
+            scores = self.reranker.predict(query_doc_pairs)
+
+            # Add scores to candidates
+            for i, score in enumerate(scores):
+                candidates[i]["rerank_score"] = float(score)
+
+            # Sort by rerank score
+            candidates.sort(key=lambda x: x.get("rerank_score", x["score"]), reverse=True)
+
+            return candidates[:self.top_k_after_rerank]
+
+        except Exception as e:
+            print(f"Reranking failed: {e}")
+            return candidates
 
     # ---------------- ingestion ----------------
 
@@ -286,7 +390,7 @@ class LiteHybridRAG:
         token_budget: int = 3500,
         metadata_filters: dict | None = None,
     ) -> list[dict]:
-        """Retrieve top-k documents using hybrid dense+BM25 retrieval.
+        """Retrieve top-k documents using hybrid dense+BM25 retrieval with optional query expansion and reranking.
         
         Args:
             query: search query
@@ -304,10 +408,148 @@ class LiteHybridRAG:
         if not self._ids:
             return []
 
-        # Create cache key
-        cache_key = f"{query}|{k}|{m}|{token_budget}|{str(metadata_filters)}"
-        if cache_key in self._query_cache:
-            return self._query_cache[cache_key]
+        # Query expansion
+        expanded_queries = self._expand_query(query)
+        all_candidates = []
+
+        for exp_query in expanded_queries:
+            # Create cache key
+            cache_key = f"{exp_query}|{k}|{m}|{token_budget}|{str(metadata_filters)}"
+            if cache_key in self._query_cache:
+                candidates = self._query_cache[cache_key]
+            else:
+                candidates = self._retrieve_single_query(exp_query, k, m, token_budget, metadata_filters)
+                # Cache result
+                if len(self._query_cache) >= self._cache_max_size:
+                    oldest_key = next(iter(self._query_cache))
+                    del self._query_cache[oldest_key]
+                self._query_cache[cache_key] = candidates
+
+            all_candidates.extend(candidates)
+
+        # Remove duplicates and sort by score
+        seen_ids = set()
+        unique_candidates = []
+        for cand in all_candidates:
+            if cand["id"] not in seen_ids:
+                unique_candidates.append(cand)
+                seen_ids.add(cand["id"])
+
+        unique_candidates.sort(key=lambda x: x["score"], reverse=True)
+
+        # Apply reranking
+        final_candidates = self._rerank_results(query, unique_candidates)
+
+        return final_candidates[:k]
+
+    def _retrieve_single_query(
+        self,
+        query: str,
+        k: int,
+        m: int,
+        token_budget: int,
+        metadata_filters: dict | None = None,
+    ) -> list[dict]:
+        """Core retrieval logic for a single query."""
+        m = min(m, len(self._ids))
+
+        # Apply metadata filtering
+        valid_indices = set(range(len(self._ids)))
+        if metadata_filters:
+            if metadata_filters.get("kind"):
+                kind = metadata_filters["kind"]
+                valid_indices &= {
+                    i for i in valid_indices
+                    if i < len(self._metas) and self._metas[i].get("kind") == kind
+                }
+            if "year_min" in metadata_filters or "year_max" in metadata_filters:
+                year_min = metadata_filters.get("year_min")
+                year_max = metadata_filters.get("year_max")
+                def in_year_range(y):
+                    if not y:
+                        return False
+                    try:
+                        y_int = int(y)
+                        if year_min and y_int < int(year_min):
+                            return False
+                        if year_max and y_int > int(year_max):
+                            return False
+                        return True
+                    except (ValueError, TypeError):
+                        return False
+                valid_indices &= {
+                    i for i in valid_indices
+                    if i < len(self._metas) and in_year_range(self._metas[i].get("year"))
+                }
+            if metadata_filters.get("source"):
+                source = metadata_filters["source"]
+                valid_indices &= {
+                    i for i in valid_indices
+                    if i < len(self._metas) and self._metas[i].get("source") == source
+                }
+
+        if not valid_indices:
+            return []
+
+        # Dense retrieval: get top-m candidates
+        qv = self.emb.encode([query], normalize_embeddings=True).tolist()
+        dres = self.col.query(query_embeddings=qv, n_results=m)
+        # chroma returns distances in cosine distance space (1 - cos)
+        d_ids = dres["ids"][0]
+        d_dist = dres["distances"][0]
+        
+        # Filter by metadata and build dense scores
+        dense_scores = {}
+        for i, dist in zip(d_ids, d_dist):
+            idx = self._ids.index(i)
+            if idx in valid_indices:
+                dense_scores[i] = max(0.0, 1.0 - float(dist))
+
+        # BM25
+        bm25_scores: dict[str, float] = {}
+        if self._bm25 is not None:
+            query_tokens = _tokenize_stem(query)
+            if query_tokens:
+                raw = np.asarray(self._bm25.get_scores(query_tokens), dtype=float)
+                if raw.size:
+                    mn, mx = float(raw.min()), float(raw.max())
+                    norm = (raw - mn) / (mx - mn + 1e-9)
+                    for idx in valid_indices:
+                        if idx < len(self._ids):
+                            bm25_scores[self._ids[idx]] = float(norm[idx])
+
+        # Fuse
+        keys = set(dense_scores) | set(bm25_scores)
+        fused = {
+            i: self.alpha * dense_scores.get(i, 0.0)
+            + (1 - self.alpha) * bm25_scores.get(i, 0.0)
+            for i in keys
+        }
+        ordered = sorted(fused.items(), key=lambda kv: kv[1], reverse=True)
+
+        # Greedy knapsack pack under token budget
+        id_to_idx = {i: j for j, i in enumerate(self._ids)}
+        selected: list[dict] = []
+        used = 0
+        for doc_id, score in ordered:
+            if len(selected) >= k:
+                break
+            idx = id_to_idx.get(doc_id)
+            if idx is None:
+                continue
+            text = self._texts[idx]
+            approx_tokens = _count_tokens(text)  # Use tiktoken instead of ÷4
+            if used + approx_tokens > token_budget and selected:
+                continue
+            selected.append({
+                "id": doc_id,
+                "text": text,
+                "meta": self._metas[idx] if idx < len(self._metas) else {},
+                "score": score,
+            })
+            used += approx_tokens
+        
+        return selected
 
         m = min(m, len(self._ids))
 

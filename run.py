@@ -18,7 +18,7 @@ from pathlib import Path
 
 import yaml
 
-from agents.llm import LLMConfig, OllamaLLM
+from agents.llm import LLMConfig, OllamaLLM, ModelSpec, ModelSelectionStrategy
 from tools.backtest import (
     BacktestConfig,
     compile_signal,
@@ -40,6 +40,29 @@ ROOT = Path(__file__).resolve().parent
 def load_config(path: str = "configs/config.yaml") -> dict:
     with open(ROOT / path, "r", encoding="utf-8") as f:
         return yaml.safe_load(f)
+
+
+def make_llm_config(cfg: dict) -> LLMConfig:
+    """Create LLMConfig from config dict, handling multi-model setup."""
+    llm_cfg = cfg["llm"]
+    models = None
+    if "models" in llm_cfg:
+        models = [ModelSpec(**m) for m in llm_cfg["models"]]
+
+    strategy = ModelSelectionStrategy.COMPLEXITY_BASED
+    if "selection_strategy" in llm_cfg:
+        strategy = ModelSelectionStrategy(llm_cfg["selection_strategy"])
+
+    return LLMConfig(
+        model=llm_cfg["model"],
+        host=llm_cfg.get("host", "http://localhost:11434"),
+        num_ctx=llm_cfg.get("num_ctx", 8192),
+        temperature=llm_cfg.get("temperature", 0.2),
+        timeout_s=llm_cfg.get("timeout_s", 180),
+        models=models,
+        selection_strategy=strategy,
+        fallback_timeout_s=llm_cfg.get("fallback_timeout_s", 60),
+    )
 
 
 def make_tools(cfg: dict):
@@ -126,13 +149,7 @@ def healthcheck(cfg: dict) -> int:
     from rag.hybrid import LiteHybridRAG
 
     print("== ROG-Agent healthcheck ==")
-    llm_cfg = LLMConfig(
-        model=cfg["llm"]["model"],
-        host=cfg["llm"]["host"],
-        num_ctx=cfg["llm"]["num_ctx"],
-        temperature=cfg["llm"]["temperature"],
-        timeout_s=cfg["llm"]["timeout_s"],
-    )
+    llm_cfg = make_llm_config(cfg)
     llm = OllamaLLM(llm_cfg)
     ok = llm.health()
     print(f"[{'OK' if ok else 'FAIL'}] Ollama reachable at {cfg['llm']['host']}")
@@ -158,6 +175,13 @@ def healthcheck(cfg: dict) -> int:
             db_path=cfg["rag"]["db_path"],
             embedding_model=cfg["rag"]["embedding_model"],
             alpha_dense=cfg["rag"]["alpha_dense"],
+            query_expansion_enabled=cfg["rag"]["query_expansion"]["enabled"],
+            query_expansion_method=cfg["rag"]["query_expansion"]["method"],
+            max_expansions=cfg["rag"]["query_expansion"]["max_expansions"],
+            reranking_enabled=cfg["rag"]["reranking"]["enabled"],
+            reranking_model=cfg["rag"]["reranking"]["model"],
+            top_k_before_rerank=cfg["rag"]["reranking"]["top_k_before_rerank"],
+            top_k_after_rerank=cfg["rag"]["reranking"]["top_k_after_rerank"],
         )
         print(f"[OK] RAG ready. {len(rag)} chunks in store.")
     except Exception as e:
@@ -199,6 +223,13 @@ def main():
             db_path=cfg["rag"]["db_path"],
             embedding_model=cfg["rag"]["embedding_model"],
             alpha_dense=cfg["rag"]["alpha_dense"],
+            query_expansion_enabled=cfg["rag"]["query_expansion"]["enabled"],
+            query_expansion_method=cfg["rag"]["query_expansion"]["method"],
+            max_expansions=cfg["rag"]["query_expansion"]["max_expansions"],
+            reranking_enabled=cfg["rag"]["reranking"]["enabled"],
+            reranking_model=cfg["rag"]["reranking"]["model"],
+            top_k_before_rerank=cfg["rag"]["reranking"]["top_k_before_rerank"],
+            top_k_after_rerank=cfg["rag"]["reranking"]["top_k_after_rerank"],
         )
         n = ingest_path(args.ingest, rag, chunk_tokens=cfg["rag"]["chunk_tokens"])
         print(f"Done. Collection now has {len(rag)} chunks (+{n} new).")
@@ -225,13 +256,8 @@ def main():
     from rag.hybrid import LiteHybridRAG
 
     # Build services
-    llm = OllamaLLM(LLMConfig(
-        model=cfg["llm"]["model"],
-        host=cfg["llm"]["host"],
-        num_ctx=cfg["llm"]["num_ctx"],
-        temperature=cfg["llm"]["temperature"],
-        timeout_s=cfg["llm"]["timeout_s"],
-    ))
+    llm_cfg = make_llm_config(cfg)
+    llm = OllamaLLM(llm_cfg)
     if not llm.health():
         print("ERROR: Ollama not reachable. Run `python run.py --healthcheck`.", file=sys.stderr)
         sys.exit(1)
@@ -240,6 +266,13 @@ def main():
         db_path=cfg["rag"]["db_path"],
         embedding_model=cfg["rag"]["embedding_model"],
         alpha_dense=cfg["rag"]["alpha_dense"],
+        query_expansion_enabled=cfg["rag"]["query_expansion"]["enabled"],
+        query_expansion_method=cfg["rag"]["query_expansion"]["method"],
+        max_expansions=cfg["rag"]["query_expansion"]["max_expansions"],
+        reranking_enabled=cfg["rag"]["reranking"]["enabled"],
+        reranking_model=cfg["rag"]["reranking"]["model"],
+        top_k_before_rerank=cfg["rag"]["reranking"]["top_k_before_rerank"],
+        top_k_after_rerank=cfg["rag"]["reranking"]["top_k_after_rerank"],
     )
 
     tools = make_tools(cfg)
