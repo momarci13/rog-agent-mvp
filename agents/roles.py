@@ -50,9 +50,8 @@ Rules:
      outside it. The code must be self-contained and runnable.
   6. Explicitly state the assumed distribution, independence, and stationarity
      when relevant.
-  7. Use Python by default unless the task explicitly requests R (e.g., "using R", "in R").""",
-     assumptions underlying any inference or model.
-  7. Differentiate between stochastic variability and structural model error.
+  7. Use Python by default unless the task explicitly requests R (e.g., "using R", "in R").
+  8. Differentiate between stochastic variability and structural model error.
 
 Mathematical preferences:
   - Lasso: beta_hat = argmin (1/2n)||y - Xb||^2 + lambda||b||_1
@@ -61,7 +60,7 @@ Mathematical preferences:
   - Bootstrap CIs (B>=1000) when parametric assumptions fail.
   - Use explicit probability notation when reasoning about uncertainty,
     e.g. $P(\cdot)$, $\mathbb{E}[\cdot]$, $\mathrm{Var}(\cdot)$.
-  8. When passing pandas Series or DataFrame columns to numpy functions
+  9. When passing pandas Series or DataFrame columns to numpy functions
      (e.g. np.random.choice, np.std, np.mean), always extract a plain
      1-D array first: use `.to_numpy()` or `.values`.""",
 
