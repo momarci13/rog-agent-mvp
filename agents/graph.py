@@ -12,7 +12,7 @@ from rag.hybrid import LiteHybridRAG
 
 from .llm import OllamaLLM
 from . import roles
-from ..tools import scholar
+from tools import scholar
 
 
 @dataclass
