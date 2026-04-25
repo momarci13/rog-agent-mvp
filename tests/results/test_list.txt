@@ -1,0 +1,27 @@
+============================= test session starts =============================
+platform win32 -- Python 3.11.9, pytest-9.0.3, pluggy-1.6.0 -- C:\Users\molna\Documents\rog-agent-mvp\.venv\Scripts\python.exe
+cachedir: .pytest_cache
+rootdir: C:\Users\molna\Documents\rog-agent-mvp
+plugins: anyio-4.13.0
+collecting ... collected 4 items
+
+<Dir rog-agent-mvp>
+  <Package tests>
+    <Module test_rag.py>
+      Tests for the RAG hybrid retriever.
+      
+      These tests don't need Ollama, but they DO download bge-small-en-v1.5
+      (~130 MB) on first run. Skipped automatically if model isn't cached.
+      <Function test_chunk_text_respects_size>
+      <Function test_parse_bibtex_basic>
+      <Function test_retrieval_finds_relevant_doc>
+        Smoke test: clearly distinct docs, retrieval should rank correctly.
+      <Function test_metadata_iter>
+
+============================== warnings summary ===============================
+tests\test_rag.py:62
+  C:\Users\molna\Documents\rog-agent-mvp\tests\test_rag.py:62: PytestUnknownMarkWarning: Unknown pytest.mark.slow - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    @pytest.mark.slow
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+========================= 4 tests collected in 16.94s =========================

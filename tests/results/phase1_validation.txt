@@ -1,0 +1,31 @@
+﻿.venv\Scripts\python.exe : Warning: You are sending unauthenticated requests 
+to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster 
+downloads.
+At line:1 char:1
++ .venv\Scripts\python.exe -c "
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (Warning: You ar...ster downloads. 
+   :String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+TEST 1: BM25 Preprocessing
+  Stemming: ['run', 'run', 'runner']
+  PASSED
+TEST 2: Token Counting
+  Tokens: 2
+  PASSED
+TEST 3: Metadata Filters in Retrieval
+
+Loading weights:   0%|          | 0/199 [00:00<?, ?it/s]
+Loading weights: 100%|##########| 199/199 [00:00<00:00, 3143.43it/s]
+[1mBertModel LOAD REPORT[0m from: BAAI/bge-small-en-v1.5
+Key                     | Status     |  | 
+------------------------+------------+--+-
+embeddings.position_ids | UNEXPECTED |  | 
+
+Notes:
+- UNEXPECTED:	can be ignored when loading from different task/architecture; 
+not ok if you expect identical arch.
+  Filtered by kind: 1 docs
+  PASSED
+ALL PHASE 1 TESTS PASSED
