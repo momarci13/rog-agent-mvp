@@ -151,6 +151,12 @@ def main():
     ap = argparse.ArgumentParser(description="ROG-Agent MVP")
     ap.add_argument("task", nargs="?", help="natural-language task")
     ap.add_argument("--ingest", metavar="PATH", help="ingest files/dir into the KB")
+    ap.add_argument("--collection", default=None, help="override the RAG collection name")
+    ap.add_argument("--chunk-tokens", type=int, default=None, help="override ingestion chunk size")
+    ap.add_argument("--overlap-tokens", type=int, default=None, help="override ingestion chunk overlap")
+    ap.add_argument("--source-tag", default=None, help="tag ingested documents with a source label")
+    ap.add_argument("--skip-existing", action="store_true", help="skip docs already present in the KB")
+    ap.add_argument("--dry-run", action="store_true", help="scan and report ingestion without adding to the KB")
     ap.add_argument("--healthcheck", action="store_true")
     ap.add_argument("--config", default="configs/config.yaml")
     ap.add_argument("--max-iter", type=int, default=None)
@@ -165,11 +171,25 @@ def main():
     if args.ingest:
         rag = LiteHybridRAG(
             db_path=cfg["rag"]["db_path"],
+            collection=args.collection or cfg["rag"].get("collection", "main"),
             embedding_model=cfg["rag"]["embedding_model"],
             alpha_dense=cfg["rag"]["alpha_dense"],
         )
-        n = ingest_path(args.ingest, rag, chunk_tokens=cfg["rag"]["chunk_tokens"])
-        print(f"Done. Collection now has {len(rag)} chunks (+{n} new).")
+        ingest_cfg = {
+            "chunk_tokens": args.chunk_tokens if args.chunk_tokens is not None else cfg["rag"]["chunk_tokens"],
+            "overlap": args.overlap_tokens if args.overlap_tokens is not None else cfg["rag"]["chunk_overlap"],
+            "source_tag": args.source_tag,
+            "skip_existing": args.skip_existing or cfg["rag"].get("skip_existing", False),
+            "dry_run": args.dry_run,
+        }
+        counts = ingest_path(args.ingest, rag, **ingest_cfg)
+        added = counts["added"]
+        skipped = counts["skipped"]
+        total = counts["total"]
+        if args.dry_run:
+            print(f"Dry run complete. {added} chunks would be added, {skipped} skipped, {total} seen.")
+        else:
+            print(f"Done. Collection now has {len(rag)} chunks (+{added} new; {skipped} duplicates skipped).")
         return
 
     if not args.task:

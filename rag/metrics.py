@@ -25,6 +25,7 @@ class RetrievalMetrics:
         retrieved_docs: list[dict],
         relevant_doc_ids: set[str] | None = None,
         metadata_filters: dict | None = None,
+        query_type: str | None = None,
     ) -> dict:
         """Log a retrieval query and compute metrics.
 
@@ -33,6 +34,7 @@ class RetrievalMetrics:
             retrieved_docs: list of {"id", "text", "meta", "score"} from RAG
             relevant_doc_ids: set of doc IDs that are relevant (for evaluation)
             metadata_filters: any metadata filters applied
+            query_type: optional domain or query intent label
         
         Returns:
             dict with computed metrics (precision@k, etc)
@@ -40,6 +42,7 @@ class RetrievalMetrics:
         metrics = {
             "timestamp": datetime.utcnow().isoformat(),
             "query": query,
+            "query_type": query_type,
             "num_retrieved": len(retrieved_docs),
             "metadata_filters": metadata_filters,
             "retrieved_ids": [d["id"] for d in retrieved_docs],
@@ -48,6 +51,7 @@ class RetrievalMetrics:
 
         # If we have ground truth, compute precision/recall
         if relevant_doc_ids:
+            relevant_doc_ids = set(relevant_doc_ids)
             retrieved_ids = set(d["id"] for d in retrieved_docs)
             true_positives = len(retrieved_ids & relevant_doc_ids)
             false_positives = len(retrieved_ids - relevant_doc_ids)
@@ -118,6 +122,10 @@ class RetrievalMetrics:
         with open(self.metrics_file, "w") as f:
             json.dump(data, f, indent=2)
         print(f"Metrics saved to {self.metrics_file}")
+
+    def summary(self) -> dict:
+        """Alias for compute_averages to support legacy metric interfaces."""
+        return self.compute_averages()
 
     def print_summary(self) -> None:
         """Print summary of metrics to console."""

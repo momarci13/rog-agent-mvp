@@ -111,10 +111,58 @@ Be skeptical of:
 }
 
 
-def build_messages(
-    role: str,
-    user_msg: str,
-    *,
+# ---------------------- citation mapping ----------------------
+
+def map_citations_to_response(response: str, context_docs: list[dict]) -> str:
+    """Replace [doc:id] references in response with proper citations.
+    
+    For BibTeX entries: [doc:bib::key] → \cite{key}
+    For document chunks: [doc:filename::hash] → [1] with footnote
+    
+    Args:
+        response: LLM response text with [doc:id] references
+        context_docs: list of retrieved documents with metadata
+        
+    Returns:
+        response with citations instead of [doc:id] references
+    """
+    import re
+    
+    # Build citation mapping
+    citation_map = {}
+    bib_refs = []
+    doc_refs = []
+    
+    for i, doc in enumerate(context_docs):
+        doc_id = doc.get('id', '')
+        meta = doc.get('meta', {})
+        
+        if meta.get('kind') == 'bib':
+            # BibTeX citation
+            key = meta.get('key', doc_id.split('::')[-1])
+            citation_map[doc_id] = f"\\cite{{{key}}}"
+            if key not in bib_refs:
+                bib_refs.append(key)
+        else:
+            # Document reference with footnote
+            source = meta.get('source', 'unknown')
+            citation_map[doc_id] = f"[{len(doc_refs) + 1}]"
+            doc_refs.append(f"[{len(doc_refs) + 1}] {source}")
+    
+    # Replace [doc:id] patterns in response
+    def replace_citation(match):
+        doc_id = match.group(1)
+        return citation_map.get(doc_id, f"[UNKNOWN:{doc_id}]")
+    
+    cited_response = re.sub(r'\[doc:([^\]]+)\]', replace_citation, response)
+    
+    # Add footnotes for document references
+    if doc_refs:
+        cited_response += "\n\n" + "\n".join(doc_refs)
+    
+    return cited_response
+
+
     context_docs: list[dict] | None = None,
     extra_system: str | None = None,
 ) -> list[dict]:
@@ -146,7 +194,9 @@ def plan(llm: OllamaLLM, task: str) -> Plan:
 def analyze(llm: OllamaLLM, task: str, docs: list[dict], *, feedback: str | None = None) -> str:
     """DS agent returns code as a markdown fenced block."""
     msgs = build_messages("DS", task, context_docs=docs, extra_system=feedback)
-    return llm.chat(msgs, temperature=0.2)
+    response = llm.chat(msgs, temperature=0.2)
+    # Map citations in the response
+    return map_citations_to_response(response, docs)
 
 
 def design_strategy(llm: OllamaLLM, task: str, docs: list[dict]) -> StrategySpec:

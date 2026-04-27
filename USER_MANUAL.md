@@ -146,6 +146,18 @@ This indexes the seed BibTeX (10 references) and the `quant_basics.md`
 primer. Adds ~30 chunks to `kb/chroma`. Takes ~30 s on first run because
 embeddings download.
 
+To extend the KB without re-ingesting duplicates:
+
+```bash
+python run.py --ingest data/papers/ --skip-existing
+```
+
+To tune ingestion behavior for larger documents:
+
+```bash
+python run.py --ingest data/papers/ --chunk-tokens 300 --overlap-tokens 40
+```
+
 ### Run a task
 
 Easiest first task — pure data science, no internet needed besides yfinance:

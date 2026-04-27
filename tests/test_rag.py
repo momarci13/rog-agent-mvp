@@ -15,13 +15,13 @@ pytest.importorskip("chromadb")
 pytest.importorskip("sentence_transformers")
 
 from rag.hybrid import LiteHybridRAG
-from rag.ingest import chunk_text, parse_bibtex
+from rag.ingest import chunk_text, ingest_path, parse_bibtex
 
 
 @pytest.fixture
 def tmp_rag():
     d = tempfile.mkdtemp(prefix="rag_test_")
-    rag = LiteHybridRAG(db_path=d, collection="t", alpha_dense=0.6)
+    rag = LiteHybridRAG(db_path=d, collection="tmp", alpha_dense=0.6)
     rag.reset()
     yield rag
     shutil.rmtree(d, ignore_errors=True)
@@ -88,3 +88,29 @@ def test_metadata_iter(tmp_rag):
     ])
     metas = list(tmp_rag.iter_metadata())
     assert any(m.get("kind") == "bib" for m in metas)
+
+
+def test_ingest_path_skips_duplicates(tmp_rag, tmp_path):
+    file_path = tmp_path / "example.md"
+    file_path.write_text("First paragraph.\n\nSecond paragraph about alpha and beta.\n")
+
+    first_pass = ingest_path(
+        file_path,
+        tmp_rag,
+        chunk_tokens=40,
+        overlap=8,
+        skip_existing=True,
+    )
+    assert first_pass["added"] > 0
+    assert first_pass["skipped"] == 0
+
+    second_pass = ingest_path(
+        file_path,
+        tmp_rag,
+        chunk_tokens=40,
+        overlap=8,
+        skip_existing=True,
+    )
+    assert second_pass["added"] == 0
+    assert second_pass["skipped"] == second_pass["total"]
+    assert len(tmp_rag) == first_pass["added"]

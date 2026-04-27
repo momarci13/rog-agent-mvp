@@ -88,6 +88,8 @@ Then:
 
 ```bash
 python run.py --ingest data/papers/                                   # build KB (~30 s)
+python run.py --ingest data/papers/ --skip-existing                  # append only new content
+python run.py --ingest data/papers/ --chunk-tokens 300 --overlap-tokens 40
 python run.py "Backtest a 50/200 SMA crossover on SPY since 2015"     # ~1-3 min
 ```
 

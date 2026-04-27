@@ -29,6 +29,7 @@ rag:
   top_k: 6
   top_m: 30                 # candidates before rerank fusion
   token_budget: 3500        # packed context budget for the LLM
+  skip_existing: true       # skip already ingested chunks during ingestion
   # Metadata filtering (optional): pass to retrieve() as dict:
   # metadata_filters: {
   #   "kind": "doc" | "bib",           # document type
