@@ -8,6 +8,18 @@ llm:
   # ~4.7 GB on disk, ~5.5 GB VRAM at 8k context.
   model: "qwen2.5:7b-instruct-q4_K_M"
 
+  # Multi-model support: list of available models with priorities
+  models:
+    - name: "qwen2.5:7b-instruct-q4_K_M"
+      priority: 1  # Highest priority (primary)
+      min_vram_gb: 6
+    - name: "qwen2.5:3b-instruct-q5_K_M"
+      priority: 2  # Fallback for simple tasks or low VRAM
+      min_vram_gb: 4
+
+  # Selection strategy: complexity_based, resource_based, or user_specified
+  selection_strategy: "complexity_based"
+
   # Fallback for 4 GB VRAM machines (uncomment + change above):
   # model: "qwen2.5:3b-instruct-q5_K_M"        # ~2.3 GB, weaker math
 
@@ -19,6 +31,7 @@ llm:
   temperature: 0.2         # low for planning / critic / code
   temperature_creative: 0.6  # writer role
   timeout_s: 180
+  fallback_timeout_s: 60   # Timeout per model in fallback chain
 
 rag:
   db_path: "./kb/chroma"
@@ -29,7 +42,6 @@ rag:
   top_k: 6
   top_m: 30                 # candidates before rerank fusion
   token_budget: 3500        # packed context budget for the LLM
-  skip_existing: true       # skip already ingested chunks during ingestion
   # Metadata filtering (optional): pass to retrieve() as dict:
   # metadata_filters: {
   #   "kind": "doc" | "bib",           # document type

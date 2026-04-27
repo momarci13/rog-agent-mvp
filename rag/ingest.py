@@ -221,28 +221,27 @@ def ingest_file(
 
     chunks = chunk_text(text, target_tokens=chunk_tokens, overlap=overlap)
     docs = []
+    topic = None
+    if path.stem in {
+        "stochastics_probability",
+        "bayesian_methods",
+        "markov_chains",
+        "stochastic_processes_finance",
+    }:
+        topic = path.stem
+
     for i, ch in enumerate(chunks):
-        h = hashlib.md5(f"{path.resolve().as_posix()}::{ch}".encode("utf-8")).hexdigest()[:12]
-        meta = {
-            "source": path.name,
-            "path": str(path),
-            "chunk": i,
-            "kind": "doc",
-        }
-        if source_tag:
-            meta["source_tag"] = source_tag
+        h = hashlib.md5(f"{path.name}::{i}".encode()).hexdigest()[:12]
+        meta = {"source": path.name, "chunk": i, "kind": "doc"}
+        if topic:
+            meta["topic"] = topic
         docs.append({
             "id": f"{path.stem}::{h}",
             "text": ch,
             "meta": meta,
         })
-
-    existing = set(rag._ids) if skip_existing else set()
-    docs_to_add = [d for d in docs if d["id"] not in existing]
-    skipped = len(docs) - len(docs_to_add)
-    if docs_to_add and not dry_run:
-        rag.add(docs_to_add)
-    return len(docs_to_add), skipped, len(docs)
+    rag.add(docs)
+    return len(docs)
 
 
 def ingest_path(

@@ -30,6 +30,10 @@ python run.py "Design a long-only mean reversion strategy that goes long when th
 python run.py "Backtest a momentum strategy: each week, hold each ETF if its 6-month return exceeds zero, otherwise zero weight. Universe: SPY, EFA, EEM, AGG, GLD, VNQ. Report Sharpe and worst drawdown."
 ```
 
+```bash
+python run.py --kan-demo
+```
+
 ## 3. Academic Writing
 
 ```bash

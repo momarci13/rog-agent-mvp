@@ -18,15 +18,17 @@ from pathlib import Path
 
 import yaml
 
-from agents.graph import run
-from agents.llm import LLMConfig, OllamaLLM
-from rag.hybrid import LiteHybridRAG
-from rag.ingest import ingest_path
+from agents.llm import LLMConfig, OllamaLLM, ModelSpec, ModelSelectionStrategy
 from tools.backtest import (
     BacktestConfig,
     compile_signal,
     fetch_yahoo,
     run_portfolio_backtest,
+)
+from tools.multifidelity_kan import (
+    ResidualKAN,
+    evaluate_regression,
+    generate_multifidelity_dataset,
 )
 from tools.sandbox import run_py
 from tools.tex import build_latex_artifact
@@ -38,6 +40,29 @@ ROOT = Path(__file__).resolve().parent
 def load_config(path: str = "configs/config.yaml") -> dict:
     with open(ROOT / path, "r", encoding="utf-8") as f:
         return yaml.safe_load(f)
+
+
+def make_llm_config(cfg: dict) -> LLMConfig:
+    """Create LLMConfig from config dict, handling multi-model setup."""
+    llm_cfg = cfg["llm"]
+    models = None
+    if "models" in llm_cfg:
+        models = [ModelSpec(**m) for m in llm_cfg["models"]]
+
+    strategy = ModelSelectionStrategy.COMPLEXITY_BASED
+    if "selection_strategy" in llm_cfg:
+        strategy = ModelSelectionStrategy(llm_cfg["selection_strategy"])
+
+    return LLMConfig(
+        model=llm_cfg["model"],
+        host=llm_cfg.get("host", "http://localhost:11434"),
+        num_ctx=llm_cfg.get("num_ctx", 8192),
+        temperature=llm_cfg.get("temperature", 0.2),
+        timeout_s=llm_cfg.get("timeout_s", 180),
+        models=models,
+        selection_strategy=strategy,
+        fallback_timeout_s=llm_cfg.get("fallback_timeout_s", 60),
+    )
 
 
 def make_tools(cfg: dict):
@@ -96,15 +121,35 @@ def _lookback_start(days: int) -> str:
     return (dt.date.today() - dt.timedelta(days=max(days, 365) + 60)).isoformat()
 
 
-def healthcheck(cfg: dict) -> int:
-    print("== ROG-Agent healthcheck ==")
-    llm_cfg = LLMConfig(
-        model=cfg["llm"]["model"],
-        host=cfg["llm"]["host"],
-        num_ctx=cfg["llm"]["num_ctx"],
-        temperature=cfg["llm"]["temperature"],
-        timeout_s=cfg["llm"]["timeout_s"],
+def run_kan_demo(samples: int = 400, random_state: int = 123) -> dict[str, Any]:
+    data = generate_multifidelity_dataset(
+        n_samples=samples,
+        n_low_features=3,
+        n_high_features=4,
+        noise_low=0.45,
+        noise_high=0.18,
+        random_state=random_state,
     )
+    model = ResidualKAN()
+    model.fit(data["X_low"], data["y_low"], data["X_high"], data["y_high"])
+
+    y_pred = model.predict(data["X_low"], data["X_high"])
+    baseline_pred = model.predict_low(data["X_low"])
+
+    return {
+        "kan_metrics": evaluate_regression(data["y_high"], y_pred),
+        "baseline_metrics": evaluate_regression(data["y_high"], baseline_pred),
+        "n_samples": samples,
+        "low_features": data["X_low"].shape[1],
+        "high_features": data["X_high"].shape[1],
+    }
+
+
+def healthcheck(cfg: dict) -> int:
+    from rag.hybrid import LiteHybridRAG
+
+    print("== ROG-Agent healthcheck ==")
+    llm_cfg = make_llm_config(cfg)
     llm = OllamaLLM(llm_cfg)
     ok = llm.health()
     print(f"[{'OK' if ok else 'FAIL'}] Ollama reachable at {cfg['llm']['host']}")
@@ -130,6 +175,13 @@ def healthcheck(cfg: dict) -> int:
             db_path=cfg["rag"]["db_path"],
             embedding_model=cfg["rag"]["embedding_model"],
             alpha_dense=cfg["rag"]["alpha_dense"],
+            query_expansion_enabled=cfg["rag"]["query_expansion"]["enabled"],
+            query_expansion_method=cfg["rag"]["query_expansion"]["method"],
+            max_expansions=cfg["rag"]["query_expansion"]["max_expansions"],
+            reranking_enabled=cfg["rag"]["reranking"]["enabled"],
+            reranking_model=cfg["rag"]["reranking"]["model"],
+            top_k_before_rerank=cfg["rag"]["reranking"]["top_k_before_rerank"],
+            top_k_after_rerank=cfg["rag"]["reranking"]["top_k_after_rerank"],
         )
         print(f"[OK] RAG ready. {len(rag)} chunks in store.")
     except Exception as e:
@@ -158,6 +210,7 @@ def main():
     ap.add_argument("--skip-existing", action="store_true", help="skip docs already present in the KB")
     ap.add_argument("--dry-run", action="store_true", help="scan and report ingestion without adding to the KB")
     ap.add_argument("--healthcheck", action="store_true")
+    ap.add_argument("--kan-demo", action="store_true", help="Run a built-in Multifidelity KAN demo")
     ap.add_argument("--config", default="configs/config.yaml")
     ap.add_argument("--max-iter", type=int, default=None)
     ap.add_argument("--out", default="output")
@@ -169,11 +222,21 @@ def main():
         sys.exit(healthcheck(cfg))
 
     if args.ingest:
+        from rag.hybrid import LiteHybridRAG
+        from rag.ingest import ingest_path
+
         rag = LiteHybridRAG(
             db_path=cfg["rag"]["db_path"],
             collection=args.collection or cfg["rag"].get("collection", "main"),
             embedding_model=cfg["rag"]["embedding_model"],
             alpha_dense=cfg["rag"]["alpha_dense"],
+            query_expansion_enabled=cfg["rag"]["query_expansion"]["enabled"],
+            query_expansion_method=cfg["rag"]["query_expansion"]["method"],
+            max_expansions=cfg["rag"]["query_expansion"]["max_expansions"],
+            reranking_enabled=cfg["rag"]["reranking"]["enabled"],
+            reranking_model=cfg["rag"]["reranking"]["model"],
+            top_k_before_rerank=cfg["rag"]["reranking"]["top_k_before_rerank"],
+            top_k_after_rerank=cfg["rag"]["reranking"]["top_k_after_rerank"],
         )
         ingest_cfg = {
             "chunk_tokens": args.chunk_tokens if args.chunk_tokens is not None else cfg["rag"]["chunk_tokens"],
@@ -192,18 +255,29 @@ def main():
             print(f"Done. Collection now has {len(rag)} chunks (+{added} new; {skipped} duplicates skipped).")
         return
 
+    if args.kan_demo:
+        demo = run_kan_demo()
+        print("\n▶ Multifidelity KAN demo results")
+        print(f"Samples: {demo['n_samples']}")
+        print(f"Low features: {demo['low_features']}, high features: {demo['high_features']}")
+        print("Baseline metrics:")
+        for k, v in demo["baseline_metrics"].items():
+            print(f"  {k}: {v:.6f}")
+        print("KAN metrics:")
+        for k, v in demo["kan_metrics"].items():
+            print(f"  {k}: {v:.6f}")
+        return
+
     if not args.task:
         ap.print_help()
         return
 
+    from agents.graph import run
+    from rag.hybrid import LiteHybridRAG
+
     # Build services
-    llm = OllamaLLM(LLMConfig(
-        model=cfg["llm"]["model"],
-        host=cfg["llm"]["host"],
-        num_ctx=cfg["llm"]["num_ctx"],
-        temperature=cfg["llm"]["temperature"],
-        timeout_s=cfg["llm"]["timeout_s"],
-    ))
+    llm_cfg = make_llm_config(cfg)
+    llm = OllamaLLM(llm_cfg)
     if not llm.health():
         print("ERROR: Ollama not reachable. Run `python run.py --healthcheck`.", file=sys.stderr)
         sys.exit(1)
@@ -212,6 +286,13 @@ def main():
         db_path=cfg["rag"]["db_path"],
         embedding_model=cfg["rag"]["embedding_model"],
         alpha_dense=cfg["rag"]["alpha_dense"],
+        query_expansion_enabled=cfg["rag"]["query_expansion"]["enabled"],
+        query_expansion_method=cfg["rag"]["query_expansion"]["method"],
+        max_expansions=cfg["rag"]["query_expansion"]["max_expansions"],
+        reranking_enabled=cfg["rag"]["reranking"]["enabled"],
+        reranking_model=cfg["rag"]["reranking"]["model"],
+        top_k_before_rerank=cfg["rag"]["reranking"]["top_k_before_rerank"],
+        top_k_after_rerank=cfg["rag"]["reranking"]["top_k_after_rerank"],
     )
 
     tools = make_tools(cfg)

@@ -1,5 +1,5 @@
 # ROG-Agent MVP
-
+python -m uvicorn server:app --reload --host 127.0.0.1 --port 8000
 A laptop-grade **multi-agent RAG system** for data science, quantitative
 trading research, and academic writing — running entirely on a local
 free LLM via Ollama.
@@ -15,7 +15,7 @@ to 4 GB VRAM or pure CPU.
 - **Three executor roles** sharing one warm model via system-prompt
   switching:
   - *Data Science* — pandas/statsmodels code generation, sandboxed
-    execution, structured output.
+    execution, structured output. Supports Python and R code generation.
   - *Trading Research* — produces typed `StrategySpec` JSON, runs an
     event-driven backtest, computes Sharpe / Sortino / **Deflated
     Sharpe** / MDD / VaR.
@@ -91,6 +91,8 @@ python run.py --ingest data/papers/                                   # build KB
 python run.py --ingest data/papers/ --skip-existing                  # append only new content
 python run.py --ingest data/papers/ --chunk-tokens 300 --overlap-tokens 40
 python run.py "Backtest a 50/200 SMA crossover on SPY since 2015"     # ~1-3 min
+python run.py --kan-demo                                                # run a built-in multifidelity KAN demo
+python -m uvicorn server:app --reload --host 127.0.0.1 --port 8000    # launch the local web UI
 ```
 
 ## Repository layout

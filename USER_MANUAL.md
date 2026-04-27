@@ -5,6 +5,7 @@
 1. [Hardware reality check](#1-hardware-reality-check)
 2. [Installation](#2-installation)
 3. [First run](#3-first-run)
+3.5 [Web interface](#35-web-interface)
 4. [How tasks work](#4-how-tasks-work)
 5. [Building your knowledge base](#5-building-your-knowledge-base)
 6. [Configuration reference](#6-configuration-reference)
@@ -158,24 +159,57 @@ To tune ingestion behavior for larger documents:
 python run.py --ingest data/papers/ --chunk-tokens 300 --overlap-tokens 40
 ```
 
-### Run a task
+### Terminal
 
-Easiest first task — pure data science, no internet needed besides yfinance:
+Run tasks via command line:
 
 ```bash
 python run.py "Compute the mean and standard deviation of SPY daily returns from 2022-01-01 to 2023-12-31 using yfinance, and report a 1000-resample bootstrap 95% CI on the mean."
 ```
 
-Expected runtime on an X13 with RTX 4060 mobile: 60–180 s end to end. The
-console prints:
+Expected runtime on an X13 with RTX 4060 mobile: 60–180 s end to end. The console prints the task classification, iteration count, critic verdict, and artifact summary. Full runs are saved to `output/runs/run_NNNN.json`.
 
-- the planner's task classification
-- the iteration count + critic verdict
-- the artifact summary (last `stdout` from the sandbox, or backtest metrics,
-  or LaTeX info)
+### Web App
 
-The full run, including all intermediate states, is saved to
-`output/runs/run_NNNN.json`.
+Start the local web server for a graphical interface:
+
+```bash
+python -m uvicorn server:app --host 127.0.0.1 --port 8000
+```
+
+Then open http://127.0.0.1:8000 in your browser. Use the web UI to run tasks, ingest documents, and view saved runs. Tasks run asynchronously and display results in the interface.
+
+---
+
+## 3.5 Web interface
+
+The web interface provides a local dashboard at http://127.0.0.1:8000 for interactive use.
+
+### Starting the server
+
+```bash
+python -m uvicorn server:app --host 127.0.0.1 --port 8000
+```
+
+The server serves static files from the `web/` directory and provides REST endpoints for task execution.
+
+### Features
+
+- **Run tasks**: Enter natural-language tasks in the text box and click "Run task". Results appear below, including generated code (Python or R) and execution output for Python tasks.
+- **Ingest documents**: Specify a file or folder path to add content to the knowledge base.
+- **Multifidelity KAN demo**: Run a built-in demonstration of the KAN model on synthetic data.
+- **Saved runs**: View and load previous task results from `output/runs/`.
+
+### API endpoints
+
+- `GET /health`: System health check (LLM, RAG status).
+- `POST /run-task`: Execute a task (accepts `{"task": "description"}`).
+- `GET /runs`: List saved run files.
+- `GET /runs/{filename}`: Retrieve a specific run's details.
+- `POST /ingest`: Ingest documents (accepts `{"path": "path/to/files"}`).
+- `POST /kan-demo`: Run the KAN demo.
+
+The web interface is fully client-side JavaScript with no external dependencies.
 
 ---
 
@@ -194,7 +228,7 @@ RAG retrieve  ── hybrid (BM25 + dense), top-k under token budget
    │
    ▼
 EXECUTE role appropriate to task type:
-   • data_science      → DS prompt → code → sandbox.run_py
+   • data_science      → DS prompt → code (Python/R) → sandbox.run_py (Python only)
    • trading_research  → QUANT prompt → StrategySpec JSON → backtest
    • writing           → outline → per-section drafts → LaTeX assemble
    │
@@ -275,6 +309,33 @@ python run.py --ingest ~/Documents/finance-papers/
 
 Supported: `.pdf`, `.md`, `.txt`, `.tex`, `.bib`. Other extensions are
 silently skipped.
+
+### Dynamic scholar augmentation
+
+For research tasks, the system automatically searches arXiv for relevant
+academic papers and adds them to your KB **for that task only**. This
+happens transparently after planning.
+
+**How it works:**
+1. Task description is analyzed for keywords (e.g., "momentum strategy"
+   → "momentum", "strategy", "finance").
+2. arXiv API queried for papers in quantitative finance (`q-fin` category).
+3. Top 5 papers fetched, converted to markdown, chunked, and indexed.
+4. Papers are retrieved alongside your static KB during execution.
+5. Papers remain in KB for future tasks (no cleanup needed).
+
+**Benefits:**
+- Access to cutting-edge research without manual curation.
+- Citations from recent papers (2020+) in writing tasks.
+- No API keys needed (arXiv is public).
+
+**Limitations:**
+- Only quantitative finance papers (`q-fin` category).
+- Requires internet connection.
+- arXiv search is keyword-based, not semantic.
+
+If no papers are found or network fails, the system continues with your
+static KB only.
 
 ### What gets indexed
 
@@ -630,6 +691,11 @@ python run.py --ingest ~/path/to/your/papers/
 python run.py "Compute volatility of SPY 2020-2024"
 python run.py "Backtest 50/200 SMA crossover on SPY since 2015"
 python run.py "Write a 4-page report on the momentum anomaly"
+python run.py --kan-demo    # run the built-in generic Multifidelity KAN demo
+
+# Run web interface
+python -m uvicorn server:app --host 127.0.0.1 --port 8000    # start web server
+# Then open http://127.0.0.1:8000 in browser
 
 # Tests
 pytest tests/test_risk.py tests/test_backtest.py    # fast, no models
