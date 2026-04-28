@@ -12,6 +12,7 @@ from rag.hybrid import LiteHybridRAG
 
 from .llm import OllamaLLM
 from . import roles
+from .problem_decoder import decode_problem, validate_requirements
 from tools import scholar
 
 
@@ -24,6 +25,7 @@ class RunState:
     critiques: list[dict] = field(default_factory=list)
     iterations: int = 0
     accepted: bool = False
+    decoding: Any = None  # Problem decoding result
 
 
 def run(
@@ -43,6 +45,14 @@ def run(
     """
     tools = tools or {}
     state = RunState(task=task)
+
+    # 0. DECODE PROBLEM
+    docs_for_decoding = rag.retrieve(task, k=3)  # Quick retrieval for context
+    decoding = decode_problem(llm, task, docs_for_decoding)
+    validation_warnings = validate_requirements(decoding)
+    if validation_warnings:
+        print(f"[GRAPH] Decoding warnings: {validation_warnings}")
+    state.decoding = decoding  # Add to state for later use
 
     # 1. PLAN
     p = roles.plan(llm, task)
@@ -89,7 +99,7 @@ def run(
                     parts.append("Reviewer suggestions:\n" + "\n".join(f"- {s}" for s in suggestions))
                 if parts:
                     feedback = "\n\n".join(parts) + "\n\nFix these issues in your revised code."
-            code_md = roles.analyze(llm, task, docs, feedback=feedback)
+            code_md = roles.analyze(llm, task, docs, feedback=feedback, decoding=state.decoding)
             lang, code = _extract_code(code_md)
             if code:
                 if lang == "python":

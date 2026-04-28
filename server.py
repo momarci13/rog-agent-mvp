@@ -13,7 +13,8 @@ from pydantic import BaseModel
 
 from run import load_config, make_llm_config, make_tools, run_kan_demo
 from agents.llm import LLMConfig, OllamaLLM
-from tools.backtest import BacktestConfig, compile_signal, fetch_yahoo, run_portfolio_backtest
+from tools.backtest import BacktestConfig, compile_signal, run_portfolio_backtest
+from tools.data import fetch_yahoo
 
 ROOT = Path(__file__).resolve().parent
 CONFIG_PATH = ROOT / "configs" / "config.yaml"

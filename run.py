@@ -22,9 +22,9 @@ from agents.llm import LLMConfig, OllamaLLM, ModelSpec, ModelSelectionStrategy
 from tools.backtest import (
     BacktestConfig,
     compile_signal,
-    fetch_yahoo,
     run_portfolio_backtest,
 )
+from tools.data import fetch_yahoo, MultiSourceFetcher
 from tools.multifidelity_kan import (
     ResidualKAN,
     evaluate_regression,
@@ -75,9 +75,11 @@ def make_tools(cfg: dict):
 
     def _backtest(spec) -> dict:
         try:
-            prices = fetch_yahoo(
+            fetcher = MultiSourceFetcher()
+            prices = fetcher.fetch(
                 spec.universe,
                 start=_lookback_start(spec.lookback_days),
+                end="2030-01-01",  # Far future
             )
             if not prices:
                 return {"error": "no data fetched"}
@@ -190,7 +192,8 @@ def healthcheck(cfg: dict) -> int:
 
     # Market data
     try:
-        data = fetch_yahoo(["SPY"], start="2024-01-01")
+        fetcher = MultiSourceFetcher()
+        data = fetcher.fetch(["SPY"], start="2024-01-01", end="2025-01-01")
         print(f"[{'OK' if data else 'WARN'}] yfinance SPY: {len(data.get('SPY', []))} bars")
     except Exception as e:
         print(f"[WARN] yfinance: {e}")

@@ -176,28 +176,4 @@ def compile_signal(signal_code: str) -> Callable[[pd.DataFrame], pd.Series]:
 
 # ---------------- market data helper ----------------
 
-def fetch_yahoo(
-    symbols: list[str],
-    start: str = "2015-01-01",
-    end: str | None = None,
-) -> dict[str, pd.DataFrame]:
-    """Download OHLCV via yfinance. Returns dict sym -> DataFrame."""
-    try:
-        import yfinance as yf
-    except ImportError:
-        raise ImportError("yfinance not installed. pip install yfinance")
-
-    out: dict[str, pd.DataFrame] = {}
-    for s in symbols:
-        df = yf.download(s, start=start, end=end, progress=False, auto_adjust=True)
-        if df.empty:
-            continue
-        # Flatten potential MultiIndex from yfinance
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = [c[0] if isinstance(c, tuple) else c for c in df.columns]
-        df.columns = [c.lower() for c in df.columns]
-        needed = ["open", "high", "low", "close", "volume"]
-        if not all(c in df.columns for c in needed):
-            continue
-        out[s] = df[needed].dropna()
-    return out
+# Moved to tools.data - import from there

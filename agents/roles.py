@@ -38,23 +38,39 @@ Respond ONLY with JSON matching this schema:
     # ---------------------- DATA SCIENCE --------------------
     "DS": """You are a senior quantitative data scientist. You write clean,
 correct, reproducible code using pandas, numpy, scipy, statsmodels, and
-scikit-learn for Python, or tidyverse, dplyr, ggplot2 for R. You prefer
-vectorized ops over loops.
+scikit-learn for Python. You prefer vectorized ops over loops.
+
+You have access to a composable analysis pipeline framework. Instead of writing
+raw analysis code, generate Python code that builds and executes an AnalysisPipeline
+from tools.analysis_pipeline import AnalysisPipeline, DataFetchStep, PreprocessingStep,
+StatisticalAnalysisStep, VisualizationStep, etc.
+
+The pipeline should:
+1. Fetch data using MultiSourceFetcher from tools.data
+2. Preprocess data (handle missing values, feature engineering)
+3. Perform statistical analysis and testing
+4. Generate visualizations
+5. Store results in pipeline context
+
+Return ONLY a fenced code block (```python) that:
+- Imports the necessary pipeline components
+- Builds a pipeline with appropriate steps
+- Executes the pipeline
+- Prints key results
 
 Rules:
   1. ALWAYS use time-series cross-validation for temporal data (never k-fold).
   2. Report point estimates WITH confidence intervals or standard errors.
   3. State the null hypothesis and test assumptions explicitly.
   4. No fabricated data — if a file/path is not given, say so.
-  5. When asked for code, return ONLY a fenced code block (```python or ```r), no prose
-     outside it. The code must be self-contained and runnable.
+  5. The code must be self-contained and runnable.
   6. Explicitly state the assumed distribution, independence, and stationarity
      when relevant.
   7. Use Python by default unless the task explicitly requests R (e.g., "using R", "in R").
   8. Differentiate between stochastic variability and structural model error.
 
 Mathematical preferences:
-  - Lasso: beta_hat = argmin (1/2n)||y - Xb||^2 + lambda||b||_1
+  - Lasso: $\\hat{\\beta} = \\arg\\min (1/(2n))\\|y - X\\beta\\|^2 + \\lambda\\|\\beta\\|_1$
   - For feature importance on nonlinear models use permutation importance,
     not just gini / gain.
   - Bootstrap CIs (B>=1000) when parametric assumptions fail.
@@ -185,6 +201,10 @@ def map_citations_to_response(response: str, context_docs: list[dict]) -> str:
     return cited_response
 
 
+def build_messages(
+    role: str,
+    user_msg: str,
+    *,
     context_docs: list[dict] | None = None,
     extra_system: str | None = None,
 ) -> list[dict]:
@@ -213,9 +233,15 @@ def plan(llm: OllamaLLM, task: str) -> Plan:
     return Plan.model_validate(raw)
 
 
-def analyze(llm: OllamaLLM, task: str, docs: list[dict], *, feedback: str | None = None) -> str:
-    """DS agent returns code as a markdown fenced block."""
-    msgs = build_messages("DS", task, context_docs=docs, extra_system=feedback)
+def analyze(llm: OllamaLLM, task: str, docs: list[dict], *, feedback: str | None = None, decoding: Any = None) -> str:
+    """DS agent returns pipeline execution code as a markdown fenced block."""
+    extra_sys = ""
+    if decoding:
+        extra_sys += f"\n\nProblem Decoding:\n{decoding.model_dump_json(indent=2)}"
+    if feedback:
+        extra_sys += f"\n\nFeedback: {feedback}"
+
+    msgs = build_messages("DS", task, context_docs=docs, extra_system=extra_sys)
     response = llm.chat(msgs, temperature=0.2)
     # Map citations in the response
     return map_citations_to_response(response, docs)
