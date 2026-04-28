@@ -6,7 +6,9 @@ while-loop does the same job in 80 lines with zero install cost.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any
+from uuid import uuid4
 
 from rag.hybrid import LiteHybridRAG
 
@@ -14,6 +16,15 @@ from .llm import OllamaLLM
 from . import roles
 from .problem_decoder import decode_problem, validate_requirements
 from tools import scholar
+
+
+@dataclass
+class Message:
+    """Represents a single message in the task conversation."""
+    role: str  # "user" or "assistant"
+    content: str
+    timestamp: datetime = field(default_factory=datetime.utcnow)
+    iteration: int = 0  # Which iteration this message belongs to
 
 
 @dataclass
@@ -26,6 +37,16 @@ class RunState:
     iterations: int = 0
     accepted: bool = False
     decoding: Any = None  # Problem decoding result
+    
+    # Conversation & metadata fields (NEW)
+    task_id: str = field(default_factory=lambda: str(uuid4()))
+    messages: list[Message] = field(default_factory=list)
+    parent_run_id: str | None = None
+    tags: list[str] = field(default_factory=list)
+    created_at: datetime = field(default_factory=datetime.utcnow)
+    updated_at: datetime = field(default_factory=datetime.utcnow)
+    branch_name: str | None = None
+    template_data: dict[str, Any] | None = None
 
 
 def run(

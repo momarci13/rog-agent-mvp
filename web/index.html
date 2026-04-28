@@ -1,44 +1,298 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="light">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>ROG-Agent Local Dashboard</title>
+  <title>ROG-Agent Dashboard</title>
   <link rel="stylesheet" href="/static/styles.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-dark.min.css" id="prism-theme">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-latex.min.js"></script>
 </head>
 <body>
-  <header>
-    <h1>ROG-Agent Local Dashboard</h1>
-    <p>Use the local UI to run tasks, ingest documents, and launch the Multifidelity KAN demo.</p>
-  </header>
-  <main>
-    <section class="card">
-      <h2>Run a natural-language task</h2>
-      <textarea id="taskInput" placeholder="Example: Design a long-only momentum strategy on SPY and backtest it."></textarea>
-      <button id="runTaskBtn">Run task</button>
-      <pre id="taskOutput">Result will appear here.</pre>
-    </section>
+  <!-- Sidebar -->
+  <aside id="sidebar" class="sidebar">
+    <div class="sidebar-header">
+      <h2>ROG-Agent</h2>
+      <button id="sidebarToggle" class="sidebar-toggle">☰</button>
+    </div>
 
-    <section class="card">
-      <h2>Ingest documents</h2>
-      <input id="ingestPath" type="text" placeholder="Path to file or folder, e.g. data/papers/" />
-      <button id="ingestBtn">Ingest</button>
-      <pre id="ingestOutput">Enter a path and ingest local content into the KB.</pre>
-    </section>
+    <nav class="sidebar-nav">
+      <a href="#dashboard" class="nav-item active" data-section="dashboard">
+        <span class="nav-icon">📊</span>
+        <span class="nav-text">Dashboard</span>
+      </a>
+      <a href="#tasks" class="nav-item" data-section="tasks">
+        <span class="nav-icon">⚡</span>
+        <span class="nav-text">Tasks</span>
+      </a>
+      <a href="#reports" class="nav-item" data-section="reports">
+        <span class="nav-icon">📄</span>
+        <span class="nav-text">Reports</span>
+      </a>
+      <a href="#data" class="nav-item" data-section="data">
+        <span class="nav-icon">📈</span>
+        <span class="nav-text">Data</span>
+      </a>
+      <a href="#settings" class="nav-item" data-section="settings">
+        <span class="nav-icon">⚙️</span>
+        <span class="nav-text">Settings</span>
+      </a>
+    </nav>
 
-    <section class="card horizontal">
-      <div>
-        <h2>Multifidelity KAN demo</h2>
-        <button id="kanBtn">Run KAN demo</button>
-        <pre id="kanOutput">Click the button to run the demo.</pre>
+    <div class="sidebar-footer">
+      <div class="system-status">
+        <div class="status-indicator" id="statusIndicator"></div>
+        <span>System Status</span>
       </div>
-      <div>
-        <h2>Saved runs</h2>
-        <button id="refreshRunsBtn">Refresh run list</button>
-        <ul id="runList"></ul>
+    </div>
+  </aside>
+
+  <!-- Main Content -->
+  <main class="main-content">
+    <!-- Header -->
+    <header class="header">
+      <div class="header-left">
+        <button id="mobileMenuBtn" class="mobile-menu-btn">☰</button>
+        <h1 id="pageTitle">Dashboard</h1>
       </div>
-    </section>
+      <div class="header-right">
+        <button id="themeToggle" class="theme-toggle">🌙</button>
+        <div class="user-menu">
+          <button id="userMenuBtn" class="user-menu-btn">👤</button>
+        </div>
+      </div>
+    </header>
+
+    <!-- Content Area -->
+    <div class="content-area">
+      <!-- Dashboard Section -->
+      <section id="dashboard-section" class="section active">
+        <div class="section-header">
+          <h2>Dashboard Overview</h2>
+          <p>Monitor system status and recent activity</p>
+        </div>
+
+        <div class="dashboard-grid">
+          <div class="metric-card">
+            <h3>Total Runs</h3>
+            <div class="metric-value" id="totalRuns">0</div>
+          </div>
+          <div class="metric-card">
+            <h3>Active Tasks</h3>
+            <div class="metric-value" id="activeTasks">0</div>
+          </div>
+          <div class="metric-card">
+            <h3>Reports Generated</h3>
+            <div class="metric-value" id="totalReports">0</div>
+          </div>
+          <div class="metric-card">
+            <h3>System Health</h3>
+            <div class="metric-value" id="systemHealth">Checking...</div>
+          </div>
+        </div>
+
+        <div class="recent-activity">
+          <h3>Recent Activity</h3>
+          <div id="activityFeed" class="activity-feed">
+            <div class="activity-item">
+              <div class="activity-icon">🔄</div>
+              <div class="activity-content">
+                <div class="activity-title">System initialized</div>
+                <div class="activity-time">Just now</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Tasks Section -->
+      <section id="tasks-section" class="section">
+        <div class="section-header">
+          <h2>Task Management</h2>
+          <p>Run analysis tasks and monitor progress</p>
+        </div>
+
+        <div class="task-controls">
+          <div class="task-input-group">
+            <select id="taskTemplate" class="task-template-select">
+              <option value="">Select a task template...</option>
+              <option value="backtest">Backtest Trading Strategy</option>
+              <option value="correlation">Analyze Asset Correlations</option>
+              <option value="kan">Run KAN Demo</option>
+              <option value="ingest">Ingest Documents</option>
+              <option value="custom">Custom Task</option>
+            </select>
+            <button id="loadTemplateBtn" class="btn-secondary">Load</button>
+          </div>
+          <button id="runTaskBtn" class="btn-primary">Run Task</button>
+        </div>
+
+        <div class="task-editor">
+          <textarea id="taskInput" placeholder="Describe your analysis task..."></textarea>
+        </div>
+
+        <div class="task-output">
+          <div class="output-tabs">
+            <button class="tab-btn active" data-tab="console">Console</button>
+            <button class="tab-btn" data-tab="results">Results</button>
+            <button class="tab-btn" data-tab="code">Generated Code</button>
+          </div>
+          <div class="output-content">
+            <div id="console-tab" class="tab-content active">
+              <pre id="taskOutput">Ready to run tasks...</pre>
+            </div>
+            <div id="results-tab" class="tab-content">
+              <div id="resultsContent">No results yet</div>
+            </div>
+            <div id="code-tab" class="tab-content">
+              <div id="codeContent">No code generated yet</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="task-history">
+          <h3>Task History</h3>
+          <div id="taskHistory" class="task-list">
+            <!-- Task history items will be populated here -->
+          </div>
+        </div>
+      </section>
+
+      <!-- Reports Section -->
+      <section id="reports-section" class="section">
+        <div class="section-header">
+          <h2>Report Viewer</h2>
+          <p>View generated reports and analysis outputs</p>
+        </div>
+
+        <div class="reports-controls">
+          <div class="reports-filters">
+            <select id="reportTypeFilter">
+              <option value="all">All Reports</option>
+              <option value="latex">LaTeX Reports</option>
+              <option value="data">Data Files</option>
+              <option value="plots">Plots</option>
+            </select>
+            <input type="text" id="reportSearch" placeholder="Search reports...">
+          </div>
+          <button id="refreshReportsBtn" class="btn-secondary">Refresh</button>
+        </div>
+
+        <div class="reports-grid">
+          <div class="reports-list">
+            <h3>Available Reports</h3>
+            <div id="reportsList" class="file-list">
+              <!-- Report files will be listed here -->
+            </div>
+          </div>
+          <div class="report-viewer">
+            <div id="reportViewer" class="viewer-content">
+              <div class="viewer-placeholder">
+                <div class="placeholder-icon">📄</div>
+                <div class="placeholder-text">Select a report to view</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Data Section -->
+      <section id="data-section" class="section">
+        <div class="section-header">
+          <h2>Data Management</h2>
+          <p>Configure data sources and manage ingestion</p>
+        </div>
+
+        <div class="data-sources">
+          <h3>Data Sources</h3>
+          <div class="source-grid">
+            <div class="source-card">
+              <h4>Yahoo Finance</h4>
+              <p>Stock price data</p>
+              <div class="source-status status-active">Active</div>
+            </div>
+            <div class="source-card">
+              <h4>KSH (Hungary)</h4>
+              <p>Economic indicators</p>
+              <div class="source-status status-inactive">Not Implemented</div>
+            </div>
+            <div class="source-card">
+              <h4>MNB (Hungary)</h4>
+              <p>Financial data</p>
+              <div class="source-status status-inactive">Not Implemented</div>
+            </div>
+            <div class="source-card">
+              <h4>Eurostat</h4>
+              <p>European statistics</p>
+              <div class="source-status status-inactive">Not Implemented</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="ingestion-controls">
+          <h3>Document Ingestion</h3>
+          <div class="ingest-form">
+            <input id="ingestPath" type="text" placeholder="Path to file or folder, e.g. data/papers/" />
+            <button id="ingestBtn" class="btn-primary">Ingest</button>
+          </div>
+          <div class="ingest-output">
+            <pre id="ingestOutput">Ready to ingest documents...</pre>
+          </div>
+        </div>
+      </section>
+
+      <!-- Settings Section -->
+      <section id="settings-section" class="section">
+        <div class="section-header">
+          <h2>Settings</h2>
+          <p>Configure system preferences and options</p>
+        </div>
+
+        <div class="settings-grid">
+          <div class="settings-group">
+            <h3>Appearance</h3>
+            <div class="setting-item">
+              <label for="themeSelect">Theme</label>
+              <select id="themeSelect">
+                <option value="light">Light</option>
+                <option value="dark">Dark</option>
+                <option value="auto">Auto</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="settings-group">
+            <h3>System</h3>
+            <div class="setting-item">
+              <button id="healthCheckBtn" class="btn-secondary">Run Health Check</button>
+              <div id="healthStatus" class="health-status">Click to check system health</div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
   </main>
+
+  <!-- Modals and Overlays -->
+  <div id="modalOverlay" class="modal-overlay"></div>
+
+  <div id="taskModal" class="modal">
+    <div class="modal-header">
+      <h3>Task Progress</h3>
+      <button class="modal-close">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="progress-bar">
+        <div class="progress-fill" id="taskProgress"></div>
+      </div>
+      <div id="taskStatus">Initializing...</div>
+    </div>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-json.min.js"></script>
   <script src="/static/app.js"></script>
 </body>
 </html>
