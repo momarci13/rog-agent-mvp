@@ -26,7 +26,7 @@ def ensure_dirs() -> None:
 
 
 def _serialize_for_json(obj: Any) -> Any:
-    """Convert objects that aren't JSON-serializable (datetime, etc.)."""
+    """Convert objects that aren't JSON-serializable (datetime, Pydantic models, etc.)."""
     if isinstance(obj, datetime):
         return obj.isoformat()
     elif isinstance(obj, Message):
@@ -38,10 +38,17 @@ def _serialize_for_json(obj: Any) -> Any:
         }
     elif isinstance(obj, (set, frozenset)):
         return list(obj)
+    elif hasattr(obj, "model_dump"):
+        # Pydantic v2 BaseModel
+        return _serialize_for_json(obj.model_dump())
     elif hasattr(obj, "__dataclass_fields__"):
         return asdict(obj, dict_factory=lambda x: {
             k: _serialize_for_json(v) for k, v in x
         })
+    elif isinstance(obj, dict):
+        return {k: _serialize_for_json(v) for k, v in obj.items()}
+    elif isinstance(obj, (list, tuple)):
+        return [_serialize_for_json(v) for v in obj]
     return obj
 
 

@@ -86,3 +86,7 @@ def run_py(
         except OSError:
             pass
     return result
+
+
+# Alias used by task_conversation
+run_code_sync = run_py

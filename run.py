@@ -260,7 +260,7 @@ def main():
 
     if args.kan_demo:
         demo = run_kan_demo()
-        print("\n▶ Multifidelity KAN demo results")
+        print("\n>> Multifidelity KAN demo results")
         print(f"Samples: {demo['n_samples']}")
         print(f"Low features: {demo['low_features']}, high features: {demo['high_features']}")
         print("Baseline metrics:")
@@ -302,7 +302,7 @@ def main():
 
     max_iter = args.max_iter or cfg["agent"]["max_iterations"]
 
-    print(f"\n▶ Task: {args.task}\n")
+    print(f"\n>> Task: {args.task}\n")
     state = run(args.task, llm, rag, max_iter=max_iter, tools=tools)
 
     # Persist + print summary

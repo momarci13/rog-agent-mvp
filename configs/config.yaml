@@ -11,11 +11,8 @@ llm:
   # Multi-model support: list of available models with priorities
   models:
     - name: "qwen2.5:7b-instruct-q4_K_M"
-      priority: 1  # Highest priority (primary)
+      priority: 1
       min_vram_gb: 6
-    - name: "qwen2.5:3b-instruct-q5_K_M"
-      priority: 2  # Fallback for simple tasks or low VRAM
-      min_vram_gb: 4
 
   # Selection strategy: complexity_based, resource_based, or user_specified
   selection_strategy: "complexity_based"
@@ -42,6 +39,15 @@ rag:
   top_k: 6
   top_m: 30                 # candidates before rerank fusion
   token_budget: 3500        # packed context budget for the LLM
+  query_expansion:
+    enabled: false
+    method: "local_model"
+    max_expansions: 3
+  reranking:
+    enabled: false
+    model: "local_cross_encoder"
+    top_k_before_rerank: 50
+    top_k_after_rerank: 6
   # Metadata filtering (optional): pass to retrieve() as dict:
   # metadata_filters: {
   #   "kind": "doc" | "bib",           # document type

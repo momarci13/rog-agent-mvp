@@ -95,23 +95,19 @@ class OllamaLLM:
 
         for model_spec in model_chain:
             try:
-                # Temporarily set model
                 original_model = self.cfg.model
                 self.cfg.model = model_spec.name
-                self._client.timeout = self.cfg.fallback_timeout_s
+                self._client.timeout = self.cfg.timeout_s
 
                 result = self.chat(messages, temperature=temperature, json_mode=json_mode, stop=stop)
-                # Restore original
                 self.cfg.model = original_model
                 self._client.timeout = self.cfg.timeout_s
                 return result
             except Exception as e:
                 last_error = e
-                # Log the failure
                 print(f"Model {model_spec.name} failed: {e}. Trying next...")
                 continue
             finally:
-                # Always restore
                 self.cfg.model = original_model
                 self._client.timeout = self.cfg.timeout_s
 
@@ -173,6 +169,14 @@ class OllamaLLM:
                 last_err = e
                 time.sleep(0.5 * (attempt + 1))
         raise RuntimeError(f"Failed to get valid JSON after {max_retries+1} tries: {last_err}")
+
+    def health(self) -> bool:
+        """Return True if the Ollama service is reachable."""
+        try:
+            r = self._client.get(f"{self.cfg.host}/api/tags", timeout=5)
+            return r.status_code == 200
+        except Exception:
+            return False
 
     def estimate_task_complexity(self, task: str) -> str:
         """Simple heuristic to estimate task complexity."""

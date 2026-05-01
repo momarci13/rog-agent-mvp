@@ -240,8 +240,13 @@ def ingest_file(
             "text": ch,
             "meta": meta,
         })
-    rag.add(docs)
-    return len(docs)
+
+    existing = set(rag._ids) if skip_existing else set()
+    docs_to_add = [d for d in docs if d["id"] not in existing]
+    skipped = len(docs) - len(docs_to_add)
+    if docs_to_add and not dry_run:
+        rag.add(docs_to_add)
+    return len(docs_to_add), skipped, len(docs)
 
 
 def ingest_path(

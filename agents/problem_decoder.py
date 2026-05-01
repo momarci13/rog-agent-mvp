@@ -16,7 +16,7 @@ class DataRequirement(BaseModel):
     symbols: List[str] = Field(description="List of data symbols/identifiers")
     sources: List[str] = Field(description="Preferred data sources (yahoo, ksh, mnb, eurostat)")
     start_date: str = Field(description="Start date in YYYY-MM-DD format")
-    end_date: Optional[str] = Field(description="End date in YYYY-MM-DD format, None for latest")
+    end_date: Optional[str] = Field(default=None, description="End date in YYYY-MM-DD format, None for latest")
     frequency: str = Field(description="Data frequency (daily, monthly, quarterly, annual)")
     data_types: List[str] = Field(description="Types of data needed (price, economic, fundamental)")
 
