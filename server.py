@@ -85,6 +85,12 @@ class TaskRequest(BaseModel):
     task: str
 
 
+class ResearchTaskRequest(BaseModel):
+    task: str
+    n_papers: int = 8
+    kg_enabled: bool = True
+
+
 class IngestRequest(BaseModel):
     path: str
 
@@ -145,6 +151,67 @@ async def run_task(payload: TaskRequest) -> dict[str, Any]:
     state = run(payload.task, llm, rag, max_iter=1, tools=tools)
     task_id = task_storage.save_task(state)
     return {"status": "ok", "task_id": task_id, "run": task_storage._serialize_for_json(state)}
+
+
+@app.post("/research-task")
+async def research_task(payload: ResearchTaskRequest) -> dict[str, Any]:
+    """Full staged research pipeline: literature + hypothesis + experiment + KG."""
+    cfg = _config()
+    llm = _llm(cfg)
+    if not llm.health():
+        raise HTTPException(500, "LLM is not healthy or unreachable.")
+
+    rag = _rag(cfg)
+    tools = make_tools(cfg)
+
+    try:
+        from agents.graph import research_run
+    except Exception as exc:
+        raise HTTPException(500, f"Research pipeline unavailable: {exc}")
+
+    research_cfg = cfg.get("research", {})
+    state = research_run(
+        payload.task, llm, rag,
+        max_iter=cfg["agent"]["max_iterations"],
+        tools=tools,
+        n_papers=payload.n_papers or research_cfg.get("n_papers", 8),
+        kg_enabled=payload.kg_enabled and research_cfg.get("kg_enabled", True),
+    )
+    task_id = task_storage.save_task(state)
+    return {"status": "ok", "task_id": task_id, "run": task_storage._serialize_for_json(state)}
+
+
+@app.get("/api/kg/summary")
+async def kg_summary() -> dict[str, Any]:
+    """Return a summary of the knowledge graph."""
+    try:
+        from kg.graph import ResearchKnowledgeGraph
+        kg = ResearchKnowledgeGraph()
+        papers = kg.find_by_type("paper")
+        findings = kg.find_by_type("finding")
+        tasks = kg.find_by_type("task")
+        return {
+            "summary": kg.summarize(),
+            "nodes": kg.G.number_of_nodes(),
+            "edges": kg.G.number_of_edges(),
+            "papers": [{"arxiv_id": p.get("arxiv_id"), "title": p.get("title"), "year": p.get("year")}
+                       for p in papers[:20]],
+            "recent_findings": [{"text": f.get("text", "")[:120], "task_id": f.get("source_task_id")}
+                                 for f in findings[-5:]],
+            "tasks": len(tasks),
+        }
+    except Exception as e:
+        raise HTTPException(500, f"Knowledge graph unavailable: {e}")
+
+
+@app.get("/api/literature/registry")
+async def literature_registry() -> dict[str, Any]:
+    """Return stats from the literature acquisition registry."""
+    try:
+        from tools.literature import registry_stats
+        return registry_stats()
+    except Exception as e:
+        raise HTTPException(500, f"Literature registry unavailable: {e}")
 
 
 @app.post("/ingest")

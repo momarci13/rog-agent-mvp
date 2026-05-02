@@ -81,3 +81,21 @@ class Critique(BaseModel):
     issues: list[str] = Field(default_factory=list)
     accept: bool
     suggested_revisions: list[str] = Field(default_factory=list)
+
+
+# ---------- Research pipeline ----------
+
+class LiteratureGapAnalysis(BaseModel):
+    """Output of the LITERATURE_ANALYST role."""
+    gaps: list[str] = Field(description="Research gaps not covered by existing literature")
+    key_findings: list[str] = Field(default_factory=list, description="Main findings in reviewed papers")
+    suggested_experiments: list[str] = Field(default_factory=list, description="Concrete experiments to run")
+    related_topics: list[str] = Field(default_factory=list, description="Adjacent topics worth exploring")
+
+
+class HypothesisSet(BaseModel):
+    """Output of the HYPOTHESIS_FORMER role."""
+    primary: str = Field(description="Main falsifiable, quantitative hypothesis")
+    secondary: list[str] = Field(default_factory=list, description="Supporting sub-hypotheses")
+    null_hypotheses: list[str] = Field(default_factory=list, description="Null hypothesis for each")
+    methodology: str = Field(default="", description="Proposed experimental methodology")

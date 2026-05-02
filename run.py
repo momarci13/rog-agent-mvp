@@ -214,6 +214,14 @@ def main():
     ap.add_argument("--dry-run", action="store_true", help="scan and report ingestion without adding to the KB")
     ap.add_argument("--healthcheck", action="store_true")
     ap.add_argument("--kan-demo", action="store_true", help="Run a built-in Multifidelity KAN demo")
+    ap.add_argument("--research", action="store_true",
+                    help="Full staged research pipeline (literature + hypothesis + experiment + KG)")
+    ap.add_argument("--n-papers", type=int, default=None,
+                    help="Number of arXiv papers to acquire in research mode")
+    ap.add_argument("--no-kg", action="store_true",
+                    help="Disable knowledge-graph update in research mode")
+    ap.add_argument("--kg-summary", action="store_true",
+                    help="Print a summary of the knowledge graph and exit")
     ap.add_argument("--config", default="configs/config.yaml")
     ap.add_argument("--max-iter", type=int, default=None)
     ap.add_argument("--out", default="output")
@@ -271,11 +279,30 @@ def main():
             print(f"  {k}: {v:.6f}")
         return
 
+    if args.kg_summary:
+        try:
+            from kg.graph import ResearchKnowledgeGraph
+            kg = ResearchKnowledgeGraph()
+            print(kg.summarize())
+            papers = kg.find_by_type("paper")
+            if papers:
+                print(f"\nPapers ({len(papers)}):")
+                for p in papers[:10]:
+                    print(f"  [{p.get('year','')}] {p.get('title','')[:70]}")
+            findings = kg.find_by_type("finding")
+            if findings:
+                print(f"\nFindings ({len(findings)}):")
+                for f in findings[:5]:
+                    print(f"  [{f.get('source_task_id','')[:8]}] {f.get('text','')[:80]}...")
+        except Exception as e:
+            print(f"Knowledge graph unavailable: {e}", file=sys.stderr)
+        return
+
     if not args.task:
         ap.print_help()
         return
 
-    from agents.graph import run
+    from agents.graph import run, research_run
     from rag.hybrid import LiteHybridRAG
 
     # Build services
@@ -299,11 +326,21 @@ def main():
     )
 
     tools = make_tools(cfg)
-
     max_iter = args.max_iter or cfg["agent"]["max_iterations"]
 
-    print(f"\n>> Task: {args.task}\n")
-    state = run(args.task, llm, rag, max_iter=max_iter, tools=tools)
+    if args.research:
+        research_cfg = cfg.get("research", {})
+        n_papers = args.n_papers or research_cfg.get("n_papers", 8)
+        kg_enabled = not args.no_kg and research_cfg.get("kg_enabled", True)
+        print(f"\n>> Research task: {args.task}\n")
+        state = research_run(
+            args.task, llm, rag,
+            max_iter=max_iter, tools=tools,
+            n_papers=n_papers, kg_enabled=kg_enabled,
+        )
+    else:
+        print(f"\n>> Task: {args.task}\n")
+        state = run(args.task, llm, rag, max_iter=max_iter, tools=tools)
 
     # Persist + print summary
     out_dir = Path(args.out) / "runs"

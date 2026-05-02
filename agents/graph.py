@@ -49,6 +49,22 @@ class RunState:
     template_data: dict[str, Any] | None = None
 
 
+def _build_feedback(state: "RunState") -> str | None:
+    """Extract actionable feedback from last artifact + critique for the next iteration."""
+    if state.iterations <= 1 or not state.artifacts:
+        return None
+    last_payload = state.artifacts[-1].get("payload", {})
+    last_critique = state.critiques[-1] if state.critiques else {}
+    parts = []
+    stderr = last_payload.get("stderr", "").strip()
+    if stderr:
+        parts.append(f"Previous run stderr:\n{stderr}")
+    suggestions = last_critique.get("suggested_revisions", [])
+    if suggestions:
+        parts.append("Reviewer suggestions:\n" + "\n".join(f"- {s}" for s in suggestions))
+    return "\n\n".join(parts) + "\n\nFix these issues in your revised code." if parts else None
+
+
 def run(
     task: str,
     llm: OllamaLLM,
@@ -188,6 +204,200 @@ def run(
 
         state.critiques.append(c.model_dump())
         state.accepted = c.accept
+
+    return state
+
+
+def research_run(
+    task: str,
+    llm: OllamaLLM,
+    rag: LiteHybridRAG,
+    *,
+    max_iter: int = 2,
+    tools: dict[str, Any] | None = None,
+    n_papers: int = 8,
+    kg_enabled: bool = True,
+) -> RunState:
+    """Full staged research pipeline:
+
+    Stage 1 — Literature acquisition (arXiv search + RAG ingest)
+    Stage 2 — Planning + Literature gap analysis + Hypothesis formation
+    Stage 3 — Execute (DS / trading / writing with hypothesis context)
+    Stage 4 — Knowledge graph update from results
+
+    Falls back gracefully if any stage fails.
+    """
+    from tools.literature import acquire_literature, literature_context
+
+    tools = tools or {}
+    state = RunState(task=task, tags=["research"])
+
+    # ── Stage 0: decode ──────────────────────────────────────────────────────
+    docs_decode = rag.retrieve(task, k=3)
+    decoding = decode_problem(llm, task, docs_decode)
+    validation_warnings = validate_requirements(decoding)
+    if validation_warnings:
+        print(f"[RESEARCH] Decoding warnings: {validation_warnings}")
+    state.decoding = decoding
+
+    # ── Stage 1: Literature ───────────────────────────────────────────────────
+    print("[RESEARCH] Stage 1: Literature acquisition...")
+    papers: list = []
+    lit_ctx = ""
+    try:
+        papers, skipped = acquire_literature(task, n_papers=n_papers, skip_known=True, rag=rag)
+        lit_ctx = literature_context(papers)
+        state.tags.append(f"papers:{len(papers)}")
+        print(f"[RESEARCH] {len(papers)} new papers acquired, {len(skipped)} already known")
+    except Exception as e:
+        print(f"[RESEARCH] Literature acquisition failed (continuing): {e}")
+
+    # ── Stage 2: Plan + Gap analysis + Hypotheses ─────────────────────────────
+    print("[RESEARCH] Stage 2: Plan + Hypothesis formation...")
+    p = roles.plan(llm, task)
+    state.task_type = p.task_type
+    state.subtasks = p.subtasks
+
+    gap_analysis = None
+    hypotheses = None
+    try:
+        lit_docs = rag.retrieve(task + " " + " ".join(p.subtasks[:3]), k=8)
+        gap_analysis = roles.analyze_literature_gaps(llm, task, lit_docs, lit_ctx)
+        hypotheses = roles.form_hypotheses(llm, task, gap_analysis)
+        print(f"[RESEARCH] Primary hypothesis: {hypotheses.primary[:80]}...")
+    except Exception as e:
+        print(f"[RESEARCH] Gap analysis / hypothesis formation failed (continuing): {e}")
+
+    # Store Stage 1+2 as a literature artifact
+    state.artifacts.append({
+        "type": "literature",
+        "payload": {
+            "papers": [
+                {"id": p.arxiv_id, "title": p.title, "year": p.published[:4]}
+                for p in papers
+            ],
+            "gap_analysis": gap_analysis.model_dump() if gap_analysis else {},
+            "hypotheses": hypotheses.model_dump() if hypotheses else {},
+        },
+    })
+
+    # ── Stage 3: Execute ──────────────────────────────────────────────────────
+    print(f"[RESEARCH] Stage 3: Execute ({state.task_type})...")
+
+    # Scholar augmentation (same as in `run`)
+    scholar_context = ""
+    try:
+        from tools import scholar
+        arxiv_papers, scholar_context = scholar.scholar_augment_task(task, n_papers=3)
+        if arxiv_papers:
+            rag.ingest_papers(arxiv_papers)
+    except Exception as e:
+        print(f"[RESEARCH] Scholar augmentation skipped: {e}")
+
+    while state.iterations < max_iter and not state.accepted:
+        state.iterations += 1
+        docs = rag.retrieve(task, k=6)
+        if scholar_context:
+            docs.insert(0, {
+                "id": "scholar_context",
+                "text": scholar_context,
+                "meta": {"kind": "scholar", "source": "arxiv_dynamic"},
+            })
+
+        hyp_extra = (
+            f"\n\nResearch hypothesis: {hypotheses.primary}"
+            f"\nMethodology: {hypotheses.methodology}"
+        ) if hypotheses else ""
+
+        if state.task_type == "data_science":
+            feedback = _build_feedback(state)
+            decoding_ctx = state.decoding
+            code_md = roles.analyze(
+                llm, task, docs,
+                feedback=feedback,
+                decoding=decoding_ctx,
+            )
+            # Inject hypothesis context into the extra_system via a second analyze call
+            # if hypotheses exist and this is the first iteration
+            if hypotheses and state.iterations == 1 and hyp_extra:
+                try:
+                    code_md = roles.analyze(
+                        llm, task, docs,
+                        feedback=f"Additional research context:{hyp_extra}",
+                        decoding=decoding_ctx,
+                    )
+                except Exception:
+                    pass  # Use first attempt
+
+            lang, code = _extract_code(code_md)
+            if code:
+                if lang == "python":
+                    code = _NUMPY_COMPAT + "\n" + code
+                elif lang == "r":
+                    code = _R_COMPAT + "\n" + code
+            run_result = {"code": "", "stdout": "", "stderr": "", "returncode": None}
+            if tools.get("run_py") and code and lang == "python":
+                run_result = tools["run_py"](code)
+                run_result["code"] = code
+            elif lang == "r":
+                run_result["code"] = code
+            state.artifacts.append({"type": "ds", "payload": run_result, "raw": code_md})
+            c = roles.critique(
+                llm,
+                f"Code:\n{code}\nstdout:\n{run_result.get('stdout','')[:1500]}"
+                f"\nstderr:\n{run_result.get('stderr','')[:500]}",
+                code_run_code=run_result.get("returncode"),
+            )
+
+        elif state.task_type == "trading_research":
+            spec = roles.design_strategy(llm, task, docs)
+            bt_result = tools["backtest"](spec) if tools.get("backtest") else None
+            state.artifacts.append({
+                "type": "quant",
+                "payload": {"spec": spec.model_dump(), "backtest": bt_result},
+            })
+            c = roles.critique(llm, f"Strategy: {spec.model_dump_json()}\nBacktest: {bt_result}")
+
+        elif state.task_type == "writing":
+            outline = roles.outline_paper(llm, task, docs)
+            sections_out = []
+            bib_keys = _collect_bib_keys(rag)
+            for sec in outline.sections:
+                sec_docs = rag.retrieve(sec.title + " " + " ".join(sec.key_points), k=4)
+                result = roles.draft_section_with_citation_check(
+                    llm, sec.title, sec.key_points, sec_docs, bib_keys, sec.target_words
+                )
+                sections_out.append({"title": sec.title, "body": result["text"]})
+                if result["uncited_claims"]:
+                    print(f"[RESEARCH] Section '{sec.title}': {len(result['uncited_claims'])} uncited claims")
+            full_tex = _assemble_tex(outline, sections_out)
+            pdf_path = tools["latex_build"](full_tex) if tools.get("latex_build") else None
+            state.artifacts.append({
+                "type": "writing",
+                "payload": {"tex": full_tex, "pdf": pdf_path, "outline": outline.model_dump()},
+            })
+            c = roles.critique(llm, full_tex[:3000])
+
+        elif state.task_type == "mixed":
+            state.task_type = "data_science"
+            continue
+
+        else:
+            raise ValueError(f"Unknown task_type: {state.task_type}")
+
+        state.critiques.append(c.model_dump())
+        state.accepted = c.accept
+
+    # ── Stage 4: Knowledge graph ──────────────────────────────────────────────
+    if kg_enabled:
+        print("[RESEARCH] Stage 4: Updating knowledge graph...")
+        try:
+            from kg.graph import ResearchKnowledgeGraph
+            kg = ResearchKnowledgeGraph()
+            kg.ingest_run_state(state, papers=papers)
+            print(f"[RESEARCH] {kg.summarize()}")
+        except Exception as e:
+            print(f"[RESEARCH] Knowledge graph update failed (non-critical): {e}")
 
     return state
 

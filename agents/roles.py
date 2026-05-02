@@ -15,6 +15,8 @@ from .llm import OllamaLLM
 from .schemas import (
     AnalysisPlan,
     Critique,
+    LiteratureGapAnalysis,
+    HypothesisSet,
     Outline,
     Plan,
     StrategySpec,
@@ -40,23 +42,14 @@ Respond ONLY with JSON matching this schema:
 correct, reproducible code using pandas, numpy, scipy, statsmodels, and
 scikit-learn for Python. You prefer vectorized ops over loops.
 
-You have access to a composable analysis pipeline framework. Instead of writing
-raw analysis code, generate Python code that builds and executes an AnalysisPipeline
-from tools.analysis_pipeline import AnalysisPipeline, DataFetchStep, PreprocessingStep,
-StatisticalAnalysisStep, VisualizationStep, etc.
-
-The pipeline should:
-1. Fetch data using MultiSourceFetcher from tools.data
-2. Preprocess data (handle missing values, feature engineering)
-3. Perform statistical analysis and testing
-4. Generate visualizations
-5. Store results in pipeline context
-
 Return ONLY a fenced code block (```python) that:
-- Imports the necessary pipeline components
-- Builds a pipeline with appropriate steps
-- Executes the pipeline
-- Prints key results
+1. Fetches data (use yfinance.download or tools.data.MultiSourceFetcher)
+2. Preprocesses data (handle missing values, feature engineering)
+3. Performs the requested statistical analysis or ML modelling
+4. Prints key results with units and confidence intervals
+
+For ML experiments you may optionally use tools.experiment.ExperimentSpec,
+run_experiment, and registry.save() for tracked, reproducible runs.
 
 Rules:
   1. ALWAYS use time-series cross-validation for temporal data (never k-fold).
@@ -123,6 +116,30 @@ Rules:
   5. When discussing statistical or probabilistic conclusions, state the
      underlying assumptions and the probability model explicitly.
   6. Do not repeat content across sections.""",
+
+    # -------------------- LITERATURE ANALYST ----------------
+    "LITERATURE_ANALYST": """You are a systematic literature reviewer for a research agent.
+
+Given a research topic and retrieved paper abstracts, produce a structured
+gap analysis that will guide hypothesis formation and experiment design.
+
+Respond ONLY with JSON matching the LiteratureGapAnalysis schema:
+{"gaps": [...], "key_findings": [...], "suggested_experiments": [...], "related_topics": [...]}
+
+Be specific and quantitative. Gaps should reference what is NOT yet studied.
+Suggested experiments must be concise and actionable (one sentence each).""",
+
+    # ------------------- HYPOTHESIS FORMER ------------------
+    "HYPOTHESIS_FORMER": """You are a research scientist forming testable hypotheses.
+
+Given a research topic and a literature gap analysis, produce a HypothesisSet.
+The primary hypothesis MUST be:
+  - Falsifiable (can be proven false with data)
+  - Quantitative (references measurable quantities, e.g. "exceeds 0.5 Sharpe")
+  - Specific (names the variables, dataset, and time period where possible)
+
+Respond ONLY with JSON matching the HypothesisSet schema:
+{"primary": "...", "secondary": [...], "null_hypotheses": [...], "methodology": "..."}""",
 
     # ----------------------- CRITIC -------------------------
     "CRITIC": """You are a strict reviewer. Evaluate the provided output
@@ -298,3 +315,74 @@ def critique(
     )
     raw = llm.chat_json(msgs, schema_hint=json.dumps(Critique.model_json_schema()))
     return Critique.model_validate(raw)
+
+
+# ---------------------- research pipeline roles ----------------------
+
+
+def analyze_literature_gaps(
+    llm: OllamaLLM,
+    topic: str,
+    docs: list[dict],
+    lit_context: str = "",
+) -> LiteratureGapAnalysis:
+    """Identify research gaps given retrieved papers and topic."""
+    extra = lit_context if lit_context else None
+    msgs = build_messages(
+        "LITERATURE_ANALYST",
+        f"Research topic: {topic}\n\nAnalyze gaps in the retrieved literature.",
+        context_docs=docs,
+        extra_system=extra,
+    )
+    raw = llm.chat_json(msgs, schema_hint=json.dumps(LiteratureGapAnalysis.model_json_schema()))
+    try:
+        return LiteratureGapAnalysis.model_validate(raw)
+    except Exception:
+        return LiteratureGapAnalysis(
+            gaps=["Insufficient literature context to identify gaps"],
+            suggested_experiments=["Conduct broad exploratory analysis first"],
+        )
+
+
+def form_hypotheses(
+    llm: OllamaLLM,
+    topic: str,
+    gap_analysis: LiteratureGapAnalysis,
+) -> HypothesisSet:
+    """Form testable hypotheses from a literature gap analysis."""
+    user_msg = (
+        f"Research topic: {topic}\n\n"
+        f"Literature gaps:\n" + "\n".join(f"- {g}" for g in gap_analysis.gaps) + "\n\n"
+        f"Suggested experiments:\n" + "\n".join(f"- {e}" for e in gap_analysis.suggested_experiments)
+    )
+    msgs = build_messages("HYPOTHESIS_FORMER", user_msg)
+    raw = llm.chat_json(msgs, schema_hint=json.dumps(HypothesisSet.model_json_schema()))
+    try:
+        return HypothesisSet.model_validate(raw)
+    except Exception:
+        return HypothesisSet(
+            primary=f"Investigate: {topic}",
+            methodology="Exploratory data analysis with statistical testing",
+        )
+
+
+def draft_section_with_citation_check(
+    llm: OllamaLLM,
+    section_title: str,
+    key_points: list[str],
+    docs: list[dict],
+    bib_keys: list[str],
+    target_words: int = 500,
+) -> dict:
+    """Draft LaTeX section and report any [CITATION NEEDED] markers.
+
+    Returns {"text": str, "uncited_claims": list[str], "citation_ok": bool}.
+    """
+    text = draft_section(llm, section_title, key_points, docs, bib_keys, target_words)
+    import re
+    uncited = re.findall(r"[^\n]*\[CITATION NEEDED\][^\n]*", text)
+    return {
+        "text": text,
+        "uncited_claims": uncited,
+        "citation_ok": len(uncited) == 0,
+    }

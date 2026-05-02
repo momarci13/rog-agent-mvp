@@ -77,3 +77,13 @@ trading:
 writing:
   latex_engine: "tectonic"  # or "pdflatex"; tectonic is a single binary
   citation_sim_threshold: 0.55  # min cosine sim to support a cited claim
+
+research:
+  # Staged research pipeline (--research flag or /research-task endpoint)
+  n_papers: 8               # arXiv papers to acquire per topic
+  kg_enabled: true          # update knowledge graph after each run
+  skip_known_papers: true   # skip papers already in the literature registry
+  # arXiv categories auto-detected from keywords:
+  #   ML/DL  -> cs.LG, cs.AI, stat.ML, stat.AP, math.ST
+  #   Finance -> q-fin, q-fin.PM, stat.ML, math.ST
+  #   Both   -> all categories above
