@@ -99,3 +99,15 @@ class HypothesisSet(BaseModel):
     secondary: list[str] = Field(default_factory=list, description="Supporting sub-hypotheses")
     null_hypotheses: list[str] = Field(default_factory=list, description="Null hypothesis for each")
     methodology: str = Field(default="", description="Proposed experimental methodology")
+
+
+# ---------- Narrative report ----------
+
+class TaskNarrative(BaseModel):
+    """Structured plain-English report generated after every task execution."""
+    objective: str = Field(description="What the task asked for and why it matters")
+    methodology: str = Field(description="Step-by-step explanation of the approach and reasoning")
+    key_results: list[str] = Field(default_factory=list, description="Bullet-point findings from the run")
+    analysis: str = Field(description="Interpretation of the results and their significance")
+    conclusions: str = Field(description="What to take away; actionable insights")
+    limitations: str = Field(default="", description="Caveats, data gaps, or model assumptions to be aware of")

@@ -25,8 +25,8 @@
         <span class="nav-text">Dashboard</span>
       </a>
       <a href="#tasks" class="nav-item" data-section="tasks">
-        <span class="nav-icon">⚡</span>
-        <span class="nav-text">Tasks</span>
+        <span class="nav-icon">💬</span>
+        <span class="nav-text">Chat</span>
       </a>
       <a href="#reports" class="nav-item" data-section="reports">
         <span class="nav-icon">📄</span>
@@ -108,56 +108,49 @@
         </div>
       </section>
 
-      <!-- Tasks Section -->
-      <section id="tasks-section" class="section">
-        <div class="section-header">
-          <h2>Task Management</h2>
-          <p>Run analysis tasks and monitor progress</p>
-        </div>
+      <!-- Chat Section -->
+      <section id="tasks-section" class="section chat-section">
+        <div class="chat-layout">
 
-        <div class="task-controls">
-          <div class="task-input-group">
-            <select id="taskTemplate" class="task-template-select">
-              <option value="">Select a task template...</option>
-              <option value="backtest">Backtest Trading Strategy</option>
-              <option value="correlation">Analyze Asset Correlations</option>
-              <option value="kan">Run KAN Demo</option>
-              <option value="ingest">Ingest Documents</option>
-              <option value="custom">Custom Task</option>
-            </select>
-            <button id="loadTemplateBtn" class="btn-secondary">Load</button>
-          </div>
-          <button id="runTaskBtn" class="btn-primary">Run Task</button>
-        </div>
-
-        <div class="task-editor">
-          <textarea id="taskInput" placeholder="Describe your analysis task..."></textarea>
-        </div>
-
-        <div class="task-output">
-          <div class="output-tabs">
-            <button class="tab-btn active" data-tab="console">Console</button>
-            <button class="tab-btn" data-tab="results">Results</button>
-            <button class="tab-btn" data-tab="code">Generated Code</button>
-          </div>
-          <div class="output-content">
-            <div id="console-tab" class="tab-content active">
-              <pre id="taskOutput">Ready to run tasks...</pre>
+          <!-- Left: conversation list -->
+          <div class="chat-sidebar-panel">
+            <div class="chat-sidebar-header">
+              <span class="chat-sidebar-title">Conversations</span>
+              <button id="newChatBtn" class="btn-new-chat" title="Start new conversation">+</button>
             </div>
-            <div id="results-tab" class="tab-content">
-              <div id="resultsContent">No results yet</div>
-            </div>
-            <div id="code-tab" class="tab-content">
-              <div id="codeContent">No code generated yet</div>
+            <div id="conversationList" class="conversation-list">
+              <div class="conv-placeholder">No conversations yet</div>
             </div>
           </div>
-        </div>
 
-        <div class="task-history">
-          <h3>Task History</h3>
-          <div id="taskHistory" class="task-list">
-            <!-- Task history items will be populated here -->
+          <!-- Right: thread + input -->
+          <div class="chat-main">
+            <div class="chat-header-bar">
+              <span id="chatTitle" class="chat-title-text">New Conversation</span>
+            </div>
+
+            <div id="chatThread" class="chat-thread">
+              <div class="chat-welcome" id="chatWelcome">
+                <div class="welcome-icon">⚡</div>
+                <h3>Start a research task</h3>
+                <p>Ask anything — financial models, trading strategies, ML experiments, academic writing.</p>
+                <div class="welcome-examples">
+                  <button class="example-chip" onclick="setInput('Backtest a 50/200 SMA crossover on SPY, QQQ, IWM')">SMA crossover backtest</button>
+                  <button class="example-chip" onclick="setInput('Compute the volatility of SPY over 2020-2024 with bootstrap CIs')">SPY volatility analysis</button>
+                  <button class="example-chip" onclick="setInput('Build an LSTM model to forecast AAPL weekly returns')">LSTM return forecast</button>
+                  <button class="example-chip" onclick="setInput('Write a 3-page report on momentum factor anomalies')">Momentum factor report</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="chat-input-bar">
+              <textarea id="chatInput" class="chat-textarea" placeholder="Describe your analysis task or ask a follow-up question..." rows="2"></textarea>
+              <button id="sendBtn" class="btn-send" onclick="sendMessage()">
+                <span id="sendBtnText">Send</span>
+              </button>
+            </div>
           </div>
+
         </div>
       </section>
 

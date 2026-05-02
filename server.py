@@ -73,6 +73,43 @@ def _rag(cfg: dict[str, Any]):
     )
 
 
+def _build_task_response(state: Any, task_id: str) -> dict[str, Any]:
+    """Extract narrative, code, and PDF URL from the last non-literature artifact."""
+    last_artifact = next(
+        (a for a in reversed(state.artifacts) if a.get("type") != "literature"), None
+    )
+    narrative: dict = {}
+    code: str = ""
+    pdf_url: str | None = None
+
+    if last_artifact:
+        report = last_artifact.get("report", {})
+        narrative = report.get("narrative", {})
+
+        art_type = last_artifact.get("type", "")
+        payload = last_artifact.get("payload", {})
+        if art_type == "ds":
+            code = payload.get("code", "")
+        elif art_type == "quant":
+            spec = payload.get("spec", {})
+            code = spec.get("signal_code", "")
+        elif art_type == "writing":
+            code = payload.get("tex", "")[:3000]
+
+        pdf_info = report.get("pdf")
+        if isinstance(pdf_info, dict) and pdf_info.get("pdf"):
+            pdf_url = f"/api/reports/{task_id}/pdf"
+
+    return {
+        "status": "ok",
+        "task_id": task_id,
+        "narrative": narrative,
+        "code": code,
+        "pdf_url": pdf_url,
+        "run": task_storage._serialize_for_json(state),
+    }
+
+
 def _save_run(state: Any) -> Path:
     OUTPUT_RUNS.mkdir(parents=True, exist_ok=True)
     idx = len(list(OUTPUT_RUNS.glob("run_*.json")))
@@ -150,7 +187,7 @@ async def run_task(payload: TaskRequest) -> dict[str, Any]:
 
     state = run(payload.task, llm, rag, max_iter=1, tools=tools)
     task_id = task_storage.save_task(state)
-    return {"status": "ok", "task_id": task_id, "run": task_storage._serialize_for_json(state)}
+    return _build_task_response(state, task_id)
 
 
 @app.post("/research-task")
@@ -178,7 +215,29 @@ async def research_task(payload: ResearchTaskRequest) -> dict[str, Any]:
         kg_enabled=payload.kg_enabled and research_cfg.get("kg_enabled", True),
     )
     task_id = task_storage.save_task(state)
-    return {"status": "ok", "task_id": task_id, "run": task_storage._serialize_for_json(state)}
+    return _build_task_response(state, task_id)
+
+
+@app.get("/api/reports/{task_id}/pdf", response_class=FileResponse)
+async def get_report_pdf(task_id: str):
+    """Serve the compiled PDF report for a task."""
+    task = task_storage.load_task(task_id)
+    if not task:
+        raise HTTPException(404, "Task not found")
+
+    for art in reversed(task.artifacts):
+        report = art.get("report", {})
+        pdf_info = report.get("pdf")
+        if isinstance(pdf_info, dict):
+            pdf_path = pdf_info.get("pdf")
+            if pdf_path and Path(pdf_path).exists():
+                return FileResponse(
+                    pdf_path,
+                    media_type="application/pdf",
+                    filename=f"report_{task_id[:8]}.pdf",
+                )
+
+    raise HTTPException(404, "PDF not found for this task (compilation may have failed)")
 
 
 @app.get("/api/kg/summary")

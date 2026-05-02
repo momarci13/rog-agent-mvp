@@ -205,6 +205,9 @@ def run(
         state.critiques.append(c.model_dump())
         state.accepted = c.accept
 
+        # Generate narrative + PDF report for the last artifact
+        _attach_narrative_report(state.artifacts[-1], state, llm, tools)
+
     return state
 
 
@@ -388,6 +391,9 @@ def research_run(
         state.critiques.append(c.model_dump())
         state.accepted = c.accept
 
+        # Generate narrative + PDF report for the last artifact
+        _attach_narrative_report(state.artifacts[-1], state, llm, tools)
+
     # ── Stage 4: Knowledge graph ──────────────────────────────────────────────
     if kg_enabled:
         print("[RESEARCH] Stage 4: Updating knowledge graph...")
@@ -490,3 +496,152 @@ def _assemble_tex(outline, sections: list[dict]) -> str:
 \bibliography{{refs}}
 \end{{document}}
 """
+
+
+def _tex_escape(text: str) -> str:
+    """Escape special LaTeX characters in plain text."""
+    replacements = [
+        ("\\", r"\textbackslash{}"),
+        ("&", r"\&"), ("%", r"\%"), ("$", r"\$"),
+        ("#", r"\#"), ("_", r"\_"), ("{", r"\{"), ("}", r"\}"),
+        ("~", r"\textasciitilde{}"), ("^", r"\textasciicircum{}"),
+    ]
+    for old, new in replacements:
+        text = text.replace(old, new)
+    return text
+
+
+def _generate_report_tex(
+    task: str,
+    narrative: Any,
+    code: str,
+    stdout: str,
+    artifact_type: str = "ds",
+) -> str:
+    """Build a LaTeX results-report document from a narrative + code + stdout."""
+    title = _tex_escape(task[:120])
+    objective = _tex_escape(narrative.objective)
+    methodology = _tex_escape(narrative.methodology)
+    analysis = _tex_escape(narrative.analysis)
+    conclusions = _tex_escape(narrative.conclusions)
+    limitations = _tex_escape(narrative.limitations) if narrative.limitations else ""
+
+    results_items = "\n".join(
+        f"  \\item {_tex_escape(r)}" for r in narrative.key_results
+    ) if narrative.key_results else "  \\item No quantitative results captured."
+
+    # Truncate and escape code for lstlisting (no LaTeX escaping needed inside verbatim)
+    code_block = code[:4000] if code else "# No code generated."
+    stdout_block = stdout[:2000] if stdout.strip() else "No output captured."
+
+    limitations_section = (
+        f"\\section{{Limitations}}\n{limitations}\n\n"
+        if limitations else ""
+    )
+
+    return rf"""\documentclass[11pt]{{article}}
+\usepackage{{amsmath,amssymb,graphicx,hyperref}}
+\usepackage[margin=1in]{{geometry}}
+\usepackage{{listings,xcolor}}
+\usepackage{{parskip}}
+
+\lstset{{
+  language=Python,
+  basicstyle=\ttfamily\small,
+  keywordstyle=\color{{blue}},
+  stringstyle=\color{{red!60!black}},
+  commentstyle=\color{{gray}},
+  breaklines=true,
+  frame=single,
+  numbers=left,
+  numberstyle=\tiny\color{{gray}},
+  tabsize=4,
+}}
+
+\title{{\textbf{{Research Report}}\\[0.5em]\large {title}}}
+\date{{\today}}
+
+\begin{{document}}
+\maketitle
+\tableofcontents
+\newpage
+
+\section{{Objective}}
+{objective}
+
+\section{{Methodology}}
+{methodology}
+
+\section{{Implementation}}
+\begin{{lstlisting}}
+{code_block}
+\end{{lstlisting}}
+
+\section{{Results}}
+\begin{{verbatim}}
+{stdout_block}
+\end{{verbatim}}
+
+\section{{Analysis}}
+{analysis}
+
+\section{{Key Findings}}
+\begin{{itemize}}
+{results_items}
+\end{{itemize}}
+
+\section{{Conclusions}}
+{conclusions}
+
+{limitations_section}\end{{document}}
+"""
+
+
+def _attach_narrative_report(
+    artifact: dict,
+    state: "RunState",
+    llm: OllamaLLM,
+    tools: dict,
+) -> None:
+    """Generate narrative + LaTeX PDF and attach to artifact in-place."""
+    try:
+        art_type = artifact.get("type", "ds")
+        payload = artifact.get("payload", {})
+
+        # Extract code and stdout from artifact
+        if art_type == "ds":
+            code = payload.get("code", "")
+            stdout = payload.get("stdout", "")
+            stderr = payload.get("stderr", "")
+        elif art_type == "quant":
+            spec = payload.get("spec", {})
+            code = f"# Strategy: {spec.get('name','')}\n# Signal: {spec.get('signal_code','')}"
+            bt = payload.get("backtest") or {}
+            stdout = "\n".join(f"{k}: {v}" for k, v in bt.items()) if isinstance(bt, dict) else str(bt)
+            stderr = ""
+        elif art_type == "writing":
+            code = payload.get("tex", "")[:2000]
+            stdout = ""
+            stderr = ""
+        else:
+            return  # skip literature artifacts
+
+        narrative = roles.generate_narrative(
+            llm, state.task, state.subtasks, code, stdout, stderr
+        )
+        report_tex = _generate_report_tex(state.task, narrative, code, stdout, art_type)
+
+        pdf_result = None
+        if tools.get("latex_build"):
+            try:
+                pdf_result = tools["latex_build"](report_tex)
+            except Exception as e:
+                print(f"[GRAPH] PDF compilation failed (non-critical): {e}")
+
+        artifact["report"] = {
+            "narrative": narrative.model_dump(),
+            "tex": report_tex,
+            "pdf": pdf_result,
+        }
+    except Exception as e:
+        print(f"[GRAPH] Narrative generation failed (non-critical): {e}")

@@ -20,6 +20,7 @@ from .schemas import (
     Outline,
     Plan,
     StrategySpec,
+    TaskNarrative,
 )
 
 
@@ -140,6 +141,28 @@ The primary hypothesis MUST be:
 
 Respond ONLY with JSON matching the HypothesisSet schema:
 {"primary": "...", "secondary": [...], "null_hypotheses": [...], "methodology": "..."}""",
+
+    # ----------------------- NARRATOR -----------------------
+    "NARRATOR": """You are a research communicator writing a structured report.
+
+Given a task description, the plan, the generated code, and the execution output,
+write a clear plain-English narrative explaining what was done and WHY at each step.
+
+Respond ONLY with JSON matching the TaskNarrative schema:
+{
+  "objective": "<what the task asked for and why it matters>",
+  "methodology": "<step-by-step explanation of the approach and reasoning behind each choice>",
+  "key_results": ["<finding 1>", "<finding 2>", ...],
+  "analysis": "<interpretation of the numbers — what they mean, how they compare to benchmarks>",
+  "conclusions": "<actionable takeaways; what should be done next or what this proves>",
+  "limitations": "<caveats: data quality, time period, model assumptions, execution errors>"
+}
+
+Rules:
+  - methodology must explain WHY each modelling choice was made, not just what was done.
+  - key_results must be quantitative where possible (e.g. "Sharpe = 1.23 vs benchmark 0.8").
+  - If code failed (stderr present), describe what went wrong and why in limitations.
+  - Be concise but precise. No marketing language.""",
 
     # ----------------------- CRITIC -------------------------
     "CRITIC": """You are a strict reviewer. Evaluate the provided output
@@ -386,3 +409,36 @@ def draft_section_with_citation_check(
         "uncited_claims": uncited,
         "citation_ok": len(uncited) == 0,
     }
+
+
+def generate_narrative(
+    llm: OllamaLLM,
+    task: str,
+    subtasks: list[str],
+    code: str,
+    stdout: str,
+    stderr: str,
+) -> TaskNarrative:
+    """Generate a structured plain-English narrative report from task execution results."""
+    subtask_str = "\n".join(f"- {s}" for s in subtasks) if subtasks else "N/A"
+    user_msg = (
+        f"Task: {task}\n\n"
+        f"Plan subtasks:\n{subtask_str}\n\n"
+        f"Code produced (first 3000 chars):\n```python\n{code[:3000]}\n```\n\n"
+        f"Execution output (stdout, first 2000 chars):\n{stdout[:2000]}\n\n"
+        f"Execution errors (stderr, first 800 chars):\n{stderr[:800]}"
+    )
+    msgs = build_messages("NARRATOR", user_msg)
+    raw = llm.chat_json(msgs, schema_hint=json.dumps(TaskNarrative.model_json_schema()))
+    try:
+        return TaskNarrative.model_validate(raw)
+    except Exception:
+        ran_ok = not stderr.strip() or "Error" not in stderr
+        return TaskNarrative(
+            objective=task,
+            methodology="Automated analysis pipeline executed.",
+            key_results=[stdout[:300]] if stdout.strip() else ["No output captured."],
+            analysis="See raw output above for details.",
+            conclusions="Review the generated code and output for findings.",
+            limitations=stderr[:300] if stderr.strip() else "",
+        )
