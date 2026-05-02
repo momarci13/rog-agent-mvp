@@ -72,7 +72,24 @@ Mathematical preferences:
     e.g. $P(\cdot)$, $\mathbb{E}[\cdot]$, $\mathrm{Var}(\cdot)$.
   9. When passing pandas Series or DataFrame columns to numpy functions
      (e.g. np.random.choice, np.std, np.mean), always extract a plain
-     1-D array first: use `.to_numpy()` or `.values`.""",
+     1-D array first: use `.to_numpy()` or `.values`.
+
+ 10. Use C++ (```cpp) when the task requires:
+     - HFT / microsecond-nanosecond latency simulation or benchmarking
+     - Ultra-fast order book processing or market microstructure simulation
+     - Real-time risk aggregation at tick speed
+     - Explicit computational speed comparison vs Python
+
+     When writing C++: C++17 assumed (-O3 -march=native at compile time).
+     Include only STL headers: <iostream>, <vector>, <algorithm>, <numeric>,
+     <chrono>, <cmath>, <random>, <string>, <unordered_map>.
+     All output via std::cout. Use <chrono> to measure and print timing in
+     microseconds. End main() with return 0. Self-contained single file.
+     Return ONLY a fenced code block (```cpp).
+
+ 11. Use C (```c) only when the task explicitly requires C (not C++).
+     C11 assumed (-O3 -march=native). All output via printf.
+     Self-contained single file. Return ONLY a fenced code block (```c).""",
 
     # --------------------- TRADING RESEARCH -----------------
     "QUANT": """You are a quantitative researcher designing systematic
@@ -424,7 +441,7 @@ def generate_narrative(
     user_msg = (
         f"Task: {task}\n\n"
         f"Plan subtasks:\n{subtask_str}\n\n"
-        f"Code produced (first 3000 chars):\n```python\n{code[:3000]}\n```\n\n"
+        f"Code produced (first 3000 chars):\n```\n{code[:3000]}\n```\n\n"
         f"Execution output (stdout, first 2000 chars):\n{stdout[:2000]}\n\n"
         f"Execution errors (stderr, first 800 chars):\n{stderr[:800]}"
     )

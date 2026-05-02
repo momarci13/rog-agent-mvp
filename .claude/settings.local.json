@@ -25,7 +25,13 @@
       "Bash(python run.py --kan-demo)",
       "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('status:', d.get\\('status'\\)\\); print\\('task_id:', d.get\\('task_id'\\)\\); state=d.get\\('run',{}\\); print\\('task_type:', state.get\\('task_type'\\)\\); print\\('accepted:', state.get\\('accepted'\\)\\)\")",
       "Bash(taskkill //F //PID 21864)",
-      "Bash(Get-ChildItem *)"
+      "Bash(Get-ChildItem *)",
+      "Bash(where g++)",
+      "Bash(where gcc *)",
+      "Bash(where cl *)",
+      "Bash(g++ --version)",
+      "Bash(gcc --version)",
+      "Bash(python *)"
     ]
   }
 }

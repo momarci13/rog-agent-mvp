@@ -150,6 +150,12 @@ def run(
             elif lang == "r":
                 # For R, just store the code without execution
                 run_result["code"] = code
+            elif tools.get("run_cpp") and code and lang == "cpp":
+                run_result = tools["run_cpp"](code)
+                run_result["code"] = code
+            elif tools.get("run_c") and code and lang == "c":
+                run_result = tools["run_c"](code)
+                run_result["code"] = code
             state.artifacts.append({"type": "ds", "payload": run_result, "raw": code_md})
 
             # 3. CRITIQUE
@@ -344,6 +350,12 @@ def research_run(
                 run_result["code"] = code
             elif lang == "r":
                 run_result["code"] = code
+            elif tools.get("run_cpp") and code and lang == "cpp":
+                run_result = tools["run_cpp"](code)
+                run_result["code"] = code
+            elif tools.get("run_c") and code and lang == "c":
+                run_result = tools["run_c"](code)
+                run_result["code"] = code
             state.artifacts.append({"type": "ds", "payload": run_result, "raw": code_md})
             c = roles.critique(
                 llm,
@@ -458,6 +470,15 @@ def _extract_code(md: str) -> tuple[str, str]:
     if "```python" in md:
         body = md.split("```python", 1)[1]
         return "python", body.split("```", 1)[0].strip()
+    # Check cpp/c++ before plain c to avoid prefix collision
+    for marker in ("```cpp", "```c++"):
+        if marker in md:
+            body = md.split(marker, 1)[1]
+            return "cpp", body.split("```", 1)[0].strip()
+    # Newline guard prevents ```cpp from matching here
+    if "```c\n" in md or "```c\r" in md:
+        body = md.split("```c", 1)[1]
+        return "c", body.split("```", 1)[0].strip()
     if "```" in md:
         body = md.split("```", 1)[1]
         return "unknown", body.split("```", 1)[0].strip()
@@ -517,8 +538,13 @@ def _generate_report_tex(
     code: str,
     stdout: str,
     artifact_type: str = "ds",
+    language: str = "python",
 ) -> str:
     """Build a LaTeX results-report document from a narrative + code + stdout."""
+    _LANG_MAP = {"python": "Python", "cpp": "C++", "c": "C", "r": "R"}
+    lst_lang = _LANG_MAP.get(language, "Python")
+    lang_label = _LANG_MAP.get(language, "Python")
+
     title = _tex_escape(task[:120])
     objective = _tex_escape(narrative.objective)
     methodology = _tex_escape(narrative.methodology)
@@ -531,7 +557,7 @@ def _generate_report_tex(
     ) if narrative.key_results else "  \\item No quantitative results captured."
 
     # Truncate and escape code for lstlisting (no LaTeX escaping needed inside verbatim)
-    code_block = code[:4000] if code else "# No code generated."
+    code_block = code[:4000] if code else f"// No {lang_label} code generated."
     stdout_block = stdout[:2000] if stdout.strip() else "No output captured."
 
     limitations_section = (
@@ -546,7 +572,6 @@ def _generate_report_tex(
 \usepackage{{parskip}}
 
 \lstset{{
-  language=Python,
   basicstyle=\ttfamily\small,
   keywordstyle=\color{{blue}},
   stringstyle=\color{{red!60!black}},
@@ -558,7 +583,7 @@ def _generate_report_tex(
   tabsize=4,
 }}
 
-\title{{\textbf{{Research Report}}\\[0.5em]\large {title}}}
+\title{{\textbf{{Research Report — {lang_label}}}\\[0.5em]\large {title}}}
 \date{{\today}}
 
 \begin{{document}}
@@ -573,7 +598,7 @@ def _generate_report_tex(
 {methodology}
 
 \section{{Implementation}}
-\begin{{lstlisting}}
+\begin{{lstlisting}}[language={lst_lang}]
 {code_block}
 \end{{lstlisting}}
 
@@ -608,6 +633,12 @@ def _attach_narrative_report(
         art_type = artifact.get("type", "ds")
         payload = artifact.get("payload", {})
 
+        # Detect language from the raw markdown stored at artifact creation time
+        raw_md = artifact.get("raw", "")
+        lang, _ = _extract_code(raw_md) if raw_md else ("python", "")
+        if lang in ("unknown", "", None):
+            lang = "python"
+
         # Extract code and stdout from artifact
         if art_type == "ds":
             code = payload.get("code", "")
@@ -619,17 +650,19 @@ def _attach_narrative_report(
             bt = payload.get("backtest") or {}
             stdout = "\n".join(f"{k}: {v}" for k, v in bt.items()) if isinstance(bt, dict) else str(bt)
             stderr = ""
+            lang = "python"  # quant specs are always Python signal code
         elif art_type == "writing":
             code = payload.get("tex", "")[:2000]
             stdout = ""
             stderr = ""
+            lang = "python"  # LaTeX, fallback label
         else:
             return  # skip literature artifacts
 
         narrative = roles.generate_narrative(
             llm, state.task, state.subtasks, code, stdout, stderr
         )
-        report_tex = _generate_report_tex(state.task, narrative, code, stdout, art_type)
+        report_tex = _generate_report_tex(state.task, narrative, code, stdout, art_type, language=lang)
 
         pdf_result = None
         if tools.get("latex_build"):

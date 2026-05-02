@@ -51,7 +51,7 @@ function showSection(sectionId) {
     sec.classList.toggle('active', sec.id === `${sectionId}-section`)
   );
   const titles = { dashboard: 'Dashboard', tasks: 'Chat', reports: 'Report Viewer', data: 'Data Management', settings: 'Settings' };
-  $('pageTitle').textContent = titles[sectionId] || 'ROG-Agent';
+  $('pageTitle').textContent = titles[sectionId] || 'Finance Assistant.ai';
   state.currentSection = sectionId;
   localStorage.setItem('currentSection', sectionId);
 }
@@ -505,7 +505,7 @@ async function init() {
   await Promise.all([loadSystemHealth(), loadConversationList(), loadDashboardStats(), loadReports()]);
 
   showSection(savedSection);
-  addActivityItem('🚀', 'ROG-Agent ready');
+  addActivityItem('🚀', 'Finance Assistant.ai ready');
 }
 
 // Global helpers for inline onclick attributes

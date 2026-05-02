@@ -30,7 +30,7 @@ from tools.multifidelity_kan import (
     evaluate_regression,
     generate_multifidelity_dataset,
 )
-from tools.sandbox import run_py
+from tools.sandbox import run_py, run_cpp, run_c
 from tools.tex import build_latex_artifact
 
 
@@ -72,6 +72,12 @@ def make_tools(cfg: dict):
 
     def _run_py(code: str) -> dict:
         return run_py(code, timeout_s=s_timeout, mem_mb=s_mem, workdir=str(ROOT / "output" / "ds"))
+
+    def _run_cpp(code: str) -> dict:
+        return run_cpp(code, timeout_s=s_timeout, mem_mb=s_mem, workdir=str(ROOT / "output" / "ds"))
+
+    def _run_c(code: str) -> dict:
+        return run_c(code, timeout_s=s_timeout, mem_mb=s_mem, workdir=str(ROOT / "output" / "ds"))
 
     def _backtest(spec) -> dict:
         try:
@@ -115,7 +121,7 @@ def make_tools(cfg: dict):
         )
         return {"tex": str(tex_p), "pdf": str(pdf_p) if pdf_p else None, "dropped_keys": dropped}
 
-    return {"run_py": _run_py, "backtest": _backtest, "latex_build": _latex}
+    return {"run_py": _run_py, "run_cpp": _run_cpp, "run_c": _run_c, "backtest": _backtest, "latex_build": _latex}
 
 
 def _lookback_start(days: int) -> str:
@@ -150,7 +156,7 @@ def run_kan_demo(samples: int = 400, random_state: int = 123) -> dict[str, Any]:
 def healthcheck(cfg: dict) -> int:
     from rag.hybrid import LiteHybridRAG
 
-    print("== ROG-Agent healthcheck ==")
+    print("== Finance Assistant.ai healthcheck ==")
     llm_cfg = make_llm_config(cfg)
     llm = OllamaLLM(llm_cfg)
     ok = llm.health()
@@ -203,7 +209,7 @@ def healthcheck(cfg: dict) -> int:
 
 
 def main():
-    ap = argparse.ArgumentParser(description="ROG-Agent MVP")
+    ap = argparse.ArgumentParser(description="Finance Assistant.ai")
     ap.add_argument("task", nargs="?", help="natural-language task")
     ap.add_argument("--ingest", metavar="PATH", help="ingest files/dir into the KB")
     ap.add_argument("--collection", default=None, help="override the RAG collection name")

@@ -23,7 +23,7 @@ CONFIG_PATH = ROOT / "configs" / "config.yaml"
 OUTPUT_RUNS = ROOT / "output" / "runs"
 OUTPUT_RUNS.mkdir(parents=True, exist_ok=True)
 
-app = FastAPI(title="ROG-Agent Local UI")
+app = FastAPI(title="Finance Assistant.ai")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
