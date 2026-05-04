@@ -89,7 +89,31 @@ Mathematical preferences:
 
  11. Use C (```c) only when the task explicitly requires C (not C++).
      C11 assumed (-O3 -march=native). All output via printf.
-     Self-contained single file. Return ONLY a fenced code block (```c).""",
+     Self-contained single file. Return ONLY a fenced code block (```c).
+
+ 12. Macroeconomic data — use FRED (no API key needed):
+     from tools.fred import get_series, get_multiple
+     Common series IDs (pass as string):
+       'GDP'       nominal GDP (quarterly)    'GDPC1'   real GDP
+       'CPIAUCSL'  CPI all-items (monthly)    'PCE'     personal consumption
+       'FEDFUNDS'  fed funds rate             'DGS10'   10Y Treasury yield
+       'DGS2'      2Y Treasury yield          'T10Y2Y'  yield-curve spread
+       'VIXCLS'    VIX (daily)                'UNRATE'  unemployment rate
+       'PAYEMS'    nonfarm payrolls            'HOUST'   housing starts
+     Each returns a pd.Series with a DatetimeIndex.
+     Example: vix = get_series('VIXCLS', start='2015-01-01', end='2023-12-31')
+
+ 13. Factor data — use the Ken French Data Library (requires pandas-datareader):
+     from tools.ken_french import get_factors, get_portfolios, ff3_alpha
+     get_factors('ff3'|'ff5'|'mom', start, end) -> DataFrame (decimal returns)
+       FF3 columns: Mkt-RF, SMB, HML, RF
+       FF5 adds:    RMW, CMA
+     get_portfolios('25_Portfolios_5x5', start, end) -> DataFrame
+     ff3_alpha(monthly_returns_series, start, end) -> dict:
+       keys: alpha (annualised), alpha_t, mkt_beta, smb_beta, hml_beta, r_squared
+     Example:
+       ff3 = get_factors('ff3', start='2010-01-01')
+       result = ff3_alpha(my_series, start='2010-01-01')""",
 
     # --------------------- TRADING RESEARCH -----------------
     "QUANT": """You are a quantitative researcher designing systematic

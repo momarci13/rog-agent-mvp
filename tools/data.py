@@ -92,6 +92,34 @@ class YahooFinanceSource(DataSource):
             return {}
 
 
+class FREDSource(DataSource):
+    """Federal Reserve Economic Data (FRED) source.
+
+    Symbols must be prefixed with 'FRED_' to route here, e.g. 'FRED_VIXCLS'.
+    Works without an API key (CSV fallback). Set FRED_API_KEY for full access.
+    """
+
+    def fetch(self, symbols: List[str], start: str, end: str) -> Dict[str, pd.DataFrame]:
+        from tools.fred import get_series
+        result = {}
+        for sym in symbols:
+            sid = sym.replace("FRED_", "", 1)
+            try:
+                s = get_series(sid, start=start, end=end)
+                df = s.reset_index()
+                df.columns = ["Date", "close"]
+                df = df.set_index("Date")
+                for col in ["open", "high", "low", "volume"]:
+                    df[col] = df["close"]
+                result[sym] = df[["open", "high", "low", "close", "volume"]]
+            except Exception as e:
+                print(f"Warning: FRED fetch failed for {sid}: {e}")
+        return result
+
+    def get_metadata(self, symbol: str) -> Dict:
+        return {"name": symbol, "source": "FRED", "type": "macroeconomic"}
+
+
 class KSHSource(DataSource):
     """Hungarian Central Statistical Office (KSH) data source.
 
@@ -150,6 +178,7 @@ class MultiSourceFetcher:
     def __init__(self):
         self.sources = {
             'yahoo': YahooFinanceSource(),
+            'fred': FREDSource(),
             'ksh': KSHSource(),
             'mnb': MNBSource(),
             'eurostat': EurostatSource(),
@@ -180,9 +209,12 @@ class MultiSourceFetcher:
         mnb_symbols = []
         eurostat_symbols = []
 
+        fred_symbols = []
         for symbol in symbols:
             symbol_upper = symbol.upper()
-            if 'HU_' in symbol_upper or 'HUNGARY' in symbol_upper:
+            if symbol_upper.startswith('FRED_'):
+                fred_symbols.append(symbol)
+            elif 'HU_' in symbol_upper or 'HUNGARY' in symbol_upper:
                 ksh_symbols.append(symbol)
             elif 'HUF' in symbol_upper or 'EUR' in symbol_upper or 'EXCHANGE' in symbol_upper:
                 mnb_symbols.append(symbol)
@@ -194,6 +226,7 @@ class MultiSourceFetcher:
 
         return {
             'yahoo': yahoo_symbols,
+            'fred': fred_symbols,
             'ksh': ksh_symbols,
             'mnb': mnb_symbols,
             'eurostat': eurostat_symbols,
